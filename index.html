@@ -291,13 +291,15 @@ section.ph .hole { height: 90px; border-radius: 10px; display: flex; align-items
   // to Top or Deleted in the list; in Deleted: Restore or Delete forever at the top
   var dragCodes = null, places = {};
   // places.json (user, 2026-11-07): the order the user set by dragging inside Top and Kept, {"<project>/top": [codes]};
-  // icons not in it come first, in the group's own order (Kept: newest number first); Waiting stays in number order inside its batch
+  // icons not in it come after, in the group's own order (Kept: newest number first); Waiting stays in number order inside its batch
   function placed(list, key) {
     var at = places[key] || [], pos = function (it) { return at.indexOf(it.code); };
-    return list.slice().sort(function (a, b) { var i = pos(a), j = pos(b); return (i < 0 && j < 0) ? 0 : i < 0 ? -1 : j < 0 ? 1 : i - j; });
+    return list.slice().sort(function (a, b) { var i = pos(a), j = pos(b); return (i < 0 && j < 0) ? 0 : i < 0 ? 1 : j < 0 ? -1 : i - j; });
   }
-  function slot(sec, x, y) {   // the card the drop goes in front of (null: at the end), skipping the dragged ones
+  function slot(sec, x, y) {   // the card the drop goes in front of (null: at the end), skipping the dragged ones;
+    // only a drop among the icons places them there: on the heading or in empty space they go to the end (user)
     var cards = [].slice.call(sec.querySelectorAll('.card')).filter(function (c) { return dragCodes.indexOf(c.dataset.code) < 0; });
+    if (cards.length && y < cards[0].getBoundingClientRect().top) return { card: null, cards: cards };
     for (var i = 0; i < cards.length; i++) {
       var r = cards[i].getBoundingClientRect();
       if (y < r.top || (y <= r.bottom && x < r.left + r.width / 2)) return { card: cards[i], cards: cards };
