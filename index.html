@@ -277,7 +277,7 @@ h2 .sub { font-weight: 400; color: var(--faint); margin-left: 6px; }
     function group(title, sub, list) { if (list.length) groups.push([title, sub, list]); }
     var desc = function (a, b) { return num(b) - num(a); };
     if (v === 'live' || v === 'final') {
-      data.projects.forEach(function (p) { group(p.title, p.prefix, items.filter(function (it) { return it.project === p.id; })); });
+      group(v === 'live' ? 'Each project\u2019s icon on its site now' : 'Live and final sets', '', items);
     } else if (v === 'inspiration') {
       group('Your earlier icons and logos', '', items.filter(function (it) { return it.group === 'own'; }));
       group('Liked', '', items.filter(function (it) { return it.group === 'liked'; }));
@@ -310,8 +310,10 @@ h2 .sub { font-weight: 400; color: var(--faint); margin-left: 6px; }
     var pic = el('div', 'pic'), img = el('img'); img.alt = it.code; pic.appendChild(img); c.appendChild(pic);
     lazy(img, it.sha, it.path);
     var m = el('div', 'meta'); m.appendChild(el('span', 'code', it.code));
-    if (it.title && it.kind !== 'proposal') m.appendChild(el('span', 't', it.title));
-    if (it.status === 'live' || it.status === 'final') m.appendChild(el('span', 'badge ' + it.status, it.status));
+    var cross = state.view === 'live' || state.view === 'final';
+    var t = cross ? (data.projects.filter(function (p) { return p.id === it.project; })[0] || {}).title : it.kind !== 'proposal' && it.title;
+    if (t) m.appendChild(el('span', 't', t));
+    if ((it.status === 'live' || it.status === 'final') && !(cross && state.view === 'live')) m.appendChild(el('span', 'badge ' + it.status, it.status));
     c.appendChild(m);
     tick.onclick = function (e) { e.stopPropagation(); pick(it.code, c); };
     c.onclick = function (e) { if (document.body.classList.contains('picking') && (e.metaKey || e.ctrlKey || e.shiftKey)) return pick(it.code, c); open(it); };
