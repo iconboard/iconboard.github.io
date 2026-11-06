@@ -163,7 +163,7 @@ h2.pickable:hover { background: var(--hover); color: var(--text); }
 </div>
 
 <div id="bar"><span id="count"></span><span class="codes" id="codes"></span><span class="codes" style="color:var(--faint)">Space to look</span>
-  <button class="btn main" id="copy">Copy codes</button><button class="btn" id="del">Delete</button><button class="btn" id="clear">Clear</button></div>
+  <button class="btn main" id="copy">Copy codes</button><button class="btn" id="del">Delete</button><button class="btn" id="forever" style="display:none">Delete forever</button><button class="btn" id="clear">Clear</button></div>
 <div id="detail"><div class="box"><div class="view"><img id="big" alt=""></div><div class="info" id="info"></div></div></div>
 <div id="toast"></div>
 <div id="ctx"></div>
@@ -231,6 +231,7 @@ h2.pickable:hover { background: var(--hover); color: var(--text); }
 
   // Deleted items: trash.json in the data repository, {code: time deleted}; the page hides them at once and can
   // restore them. Claude removes the files of items deleted more than a day ago, at its next work on the icons.
+  // Delete forever writes "forever" as the time: the data repository's workflow purge.yml then removes the files.
   var jhead = { Authorization: 'Bearer ' + token, Accept: 'application/vnd.github+json' };
   var shas = {};                        // the sha of each JSON file as last read, for writing it back
   function readJson(path, empty) {
@@ -276,11 +277,19 @@ h2.pickable:hover { background: var(--hover); color: var(--text); }
       toast('Restored ' + codes.join(', '));
     }, function (e) { codes.forEach(function (c) { trash[c] = was[c]; }); refresh(); failed(e); });
   }
+  function forever(codes) {   // as in Gmail's Trash: gone from the board at once, files removed by the data repository's workflow
+    var was = {}; codes.forEach(function (c) { was[c] = trash[c]; trash[c] = 'forever'; });
+    refresh();
+    writeTrash(function (t) { codes.forEach(function (c) { t[c] = 'forever'; }); }, 'Delete forever ' + codes.join(', ') + ' (board)').then(function () {
+      toast('Deleted forever ' + codes.join(', '));
+    }, function (e) { codes.forEach(function (c) { trash[c] = was[c]; }); refresh(); failed(e); });
+  }
   function failed(e) {
     toast(e.readOnly ? 'Not saved. GitHub says: ' + e.message + '. The token needs Contents: Read and write on the data repository.' : 'Not saved: ' + e.message, 'OK', function () {});
   }
   function refresh() { var y = $('main').scrollTop, z = $('side').scrollTop; side(); show(); $('main').scrollTop = y; $('side').scrollTop = z; }
   function gone(it) { return !!trash[it.code]; }
+  function binned(it) { return gone(it) && trash[it.code] !== 'forever'; }   // what the Deleted view shows
   // marks.json: the user's own status for an icon (top, kept, waiting), set on the board; Claude makes the set files
   // of a proposal marked kept or top, and moves the marks into board.json, at its next work on the icons
   function st(it) { var m = marks[it.code]; return m && it.status !== 'live' && ICONLIKE[it.kind] ? m : it.status; }
@@ -339,7 +348,7 @@ h2.pickable:hover { background: var(--hover); color: var(--text); }
     nav('live', 'Live on sites', count(function (it) { return st(it) === 'live'; }));
     nav('top', 'Top', count(function (it) { return st(it) === 'top' || st(it) === 'live'; }));
     nav('inspiration', 'Inspiration', count(function (it) { return it.project === 'inspiration'; }));
-    var nDel = data.items.filter(gone).length;
+    var nDel = data.items.filter(binned).length;
     if (nDel || state.view === 'deleted') nav('deleted', 'Deleted', nDel);
     s.appendChild(el('div', 'label', 'Projects'));
     data.projects.forEach(function (p) {
@@ -364,7 +373,7 @@ h2.pickable:hover { background: var(--hover); color: var(--text); }
 
   function inView() {
     var v = state.view;
-    if (v === 'deleted') return data.items.filter(gone);
+    if (v === 'deleted') return data.items.filter(binned);
     return data.items.filter(function (it) {
       if (gone(it)) return false;
       if (v === 'live') return st(it) === 'live';
@@ -391,7 +400,11 @@ h2.pickable:hover { background: var(--hover); color: var(--text); }
     function group(title, sub, list) { if (list.length) groups.push([title, sub, list]); }
     var desc = function (a, b) { return num(b) - num(a); };
     if (v === 'deleted') {
-      group('Deleted', 'removed for good a day after deletion, when Claude next works on the icons', items.slice().sort(function (a, b) { return trash[b.code] < trash[a.code] ? -1 : 1; }));
+      // icons and other images apart, so the icons keep the tile size of the project pages
+      var recent = items.slice().sort(function (a, b) { return trash[b.code] < trash[a.code] ? -1 : 1; });
+      var sub = 'restorable for a day; Delete forever removes them now';
+      group('Deleted icons', sub, recent.filter(function (it) { return ICONLIKE[it.kind]; }));
+      group('Deleted images', sub, recent.filter(function (it) { return !ICONLIKE[it.kind]; }));
     } else if (v === 'live' || v === 'top') {
       group(v === 'live' ? 'Each project\u2019s icon on its site now' : 'Live and top sets', '', items);
     } else if (v === 'inspiration') {
@@ -478,7 +491,7 @@ h2.pickable:hover { background: var(--hover); color: var(--text); }
       });
     }
     line();
-    if (state.view === 'deleted') item('Restore', '', function () { restore(codes); });
+    if (state.view === 'deleted') { item('Restore', '', function () { restore(codes); }); item('Delete forever', 'Del', function () { forever(codes); }); }
     else item('Delete', 'Del', function () { $('del').onclick(); });
     box.style.display = 'block';
     var w = box.offsetWidth, h = box.offsetHeight;
@@ -506,6 +519,7 @@ h2.pickable:hover { background: var(--hover); color: var(--text); }
     $('bar').style.display = picked.length ? 'flex' : 'none';
     $('count').textContent = picked.length + ' selected';
     $('del').textContent = state.view === 'deleted' ? 'Restore' : 'Delete';
+    $('forever').style.display = state.view === 'deleted' ? '' : 'none';
     $('codes').textContent = picked.join(', ');
   }
   $('copy').onclick = function () { copy(picked.join(', ')); };
@@ -514,6 +528,7 @@ h2.pickable:hover { background: var(--hover); color: var(--text); }
     $('clear').onclick();
     if (back) restore(codes.filter(function (c) { return trash[c]; })); else remove(codes);
   };
+  $('forever').onclick = function () { var codes = picked.slice(); $('clear').onclick(); forever(codes.filter(function (c) { return trash[c]; })); };
   $('clear').onclick = function () {
     picked = []; document.querySelectorAll('.card.sel').forEach(function (c) { c.classList.remove('sel'); });
     $('bar').style.display = 'none'; document.body.classList.remove('picking');
@@ -563,8 +578,10 @@ h2.pickable:hover { background: var(--hover); color: var(--text); }
     cp.onclick = function () { copy(it.code); };
     var del = el('button', 'btn', gone(it) ? 'Restore' : 'Delete');
     del.onclick = function () { close(); if (gone(it)) restore([it.code]); else remove([it.code]); };
-    acts.appendChild(cp); acts.appendChild(del); info.appendChild(acts);
-    if (gone(it)) info.appendChild(el('p', 'note', 'Deleted ' + new Date(trash[it.code]).toLocaleString() + '. Removed for good when Claude next works on the icons, a day after deletion at the earliest.'));
+    acts.appendChild(cp); acts.appendChild(del);
+    if (binned(it)) { var fv = el('button', 'btn', 'Delete forever'); fv.onclick = function () { close(); forever([it.code]); }; acts.appendChild(fv); }
+    info.appendChild(acts);
+    if (binned(it)) info.appendChild(el('p', 'note', 'Deleted ' + new Date(trash[it.code]).toLocaleString() + '. Restorable for a day; removed for good after that when Claude next works on the icons, or now with Delete forever.'));
     $('detail').style.display = 'flex';
     history.replaceState(null, '', '#' + state.view + (state.status !== 'all' ? '/' + state.status : '') + '/' + it.code);
   }
@@ -583,7 +600,7 @@ h2.pickable:hover { background: var(--hover); color: var(--text); }
       if (code && byCode[code.toUpperCase()]) open(byCode[code.toUpperCase()]);
       return;
     }
-    if (!open_ && (e.key === 'Delete' || e.key === 'Backspace') && picked.length) { e.preventDefault(); return $('del').onclick(); }
+    if (!open_ && (e.key === 'Delete' || e.key === 'Backspace') && picked.length) { e.preventDefault(); return (state.view === 'deleted' ? $('forever') : $('del')).onclick(); }
     var mk = { t: 'top', k: 'kept', w: 'waiting' }[e.key.toLowerCase()];
     if (!open_ && mk && picked.length && state.view !== 'deleted') { e.preventDefault(); return mark(picked.slice(), mk); }
     if (!open_ && e.key.toLowerCase() === 'c' && picked.length) { e.preventDefault(); return copy(picked.join(', ')); }
@@ -594,7 +611,7 @@ h2.pickable:hover { background: var(--hover); color: var(--text); }
       return;
     }
     if (!open_ && (e.key === 'ArrowDown' || e.key === 'ArrowUp')) {
-      var views = ['live', 'top', 'inspiration'].concat(data.items.some(gone) ? ['deleted'] : [], data.projects.map(function (p) { return p.id; }));
+      var views = ['live', 'top', 'inspiration'].concat(data.items.some(binned) ? ['deleted'] : [], data.projects.map(function (p) { return p.id; }));
       var j = views.indexOf(state.view) + (e.key === 'ArrowDown' ? 1 : -1);
       if (j < 0 || j >= views.length) return;
       e.preventDefault(); state.view = views[j]; state.status = 'all'; go();
