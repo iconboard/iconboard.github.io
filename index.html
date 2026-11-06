@@ -87,7 +87,12 @@ h2.pickable:hover { background: var(--hover); color: var(--text); }
 /* dragging icons: drop on a zone of the strip, a group heading (Top, Kept, Waiting) or Top / Deleted in the list */
 #drops { position: fixed; top: 14px; left: 50%; transform: translateX(-50%); display: none; gap: 8px; z-index: 40; background: #2a2a2a; border: 1px solid var(--line); border-radius: 14px; padding: 8px; box-shadow: 0 10px 30px rgba(0,0,0,.4); }
 #drops div { padding: 10px 18px; border: 1px dashed #555; border-radius: 10px; color: var(--muted); font-size: 13.5px; }
-#drops div.hl, h2.hl, .nav.hl { background: #3d3d3d; color: var(--text); border-color: #999; }
+#drops div.hl, .nav.hl { background: #3d3d3d; color: var(--text); border-color: #999; }
+section.zone { border-radius: 12px; outline: 1.5px dashed transparent; outline-offset: 4px; margin-bottom: 10px; }
+body.dragging section.zone { outline-color: #444; }
+body.dragging section.zone.hl { outline-color: #aaa; background: rgba(255,255,255,.04); }
+section.ph { display: none; } body.dragging section.ph { display: block; }
+section.ph .hole { height: 90px; border-radius: 10px; display: flex; align-items: center; justify-content: center; color: var(--faint); font-size: 13px; }
 #ghost { position: fixed; top: -100px; left: 0; padding: 5px 10px; background: #3a3a3a; color: var(--text); border-radius: 8px; font-size: 13px; }
 
 /* selection bar */
@@ -283,8 +288,9 @@ h2.pickable:hover { background: var(--hover); color: var(--text); }
       toast('Restored ' + codes.join(', '));
     }, function (e) { codes.forEach(function (c) { trash[c] = was[c]; }); refresh(); failed(e); });
   }
-  // dragging icons (user, 2026-11-07): the picked icons, or the one under the pointer, go where they are dropped:
-  // Top, Kept, Waiting (as the keys T, K, W), Delete; in Deleted: Restore or Delete forever
+  // dragging icons (user, 2026-11-07): the picked icons, or the one under the pointer, go to the group they are
+  // dropped on (Top, Kept, Waiting, as the keys T, K, W; any Waiting batch means Waiting, in the icon's own batch),
+  // to Top or Deleted in the list; in Deleted: Restore or Delete forever at the top
   var dragCodes = null;
   var ZONES = { top: 'Top', kept: 'Kept', waiting: 'Waiting', 'delete': 'Delete', restore: 'Restore', forever: 'Delete forever' };
   function dragStart(e, code, c) {
@@ -292,19 +298,19 @@ h2.pickable:hover { background: var(--hover); color: var(--text); }
     dragCodes = picked.slice();
     e.dataTransfer.setData('application/x-board-codes', dragCodes.join(',')); e.dataTransfer.effectAllowed = 'move';
     var g = $('ghost'); g.textContent = dragCodes.length > 1 ? dragCodes.length + ' icons' : code; e.dataTransfer.setDragImage(g, -10, -10);
-    var d = $('drops'); d.innerHTML = '';
-    (state.view === 'deleted' ? ['restore', 'forever'] : ['top', 'kept', 'waiting', 'delete']).forEach(function (k) { dropOn(d.appendChild(el('div', '', ZONES[k])), k); });
-    setTimeout(function () { d.style.display = 'flex'; var dn = document.querySelector('.nav[data-drop="delete"]'); if (dn && state.view !== 'deleted') dn.style.display = ''; }, 0);
+    var d = $('drops'); d.innerHTML = '';   // Deleted has no groups to drop into: Restore and Delete forever at the top
+    if (state.view === 'deleted') ['restore', 'forever'].forEach(function (k) { dropOn(d.appendChild(el('div', '', ZONES[k])), k); });
+    setTimeout(function () { document.body.classList.add('dragging'); if (state.view === 'deleted') d.style.display = 'flex'; var dn = document.querySelector('.nav[data-drop="delete"]'); if (dn && state.view !== 'deleted') dn.style.display = ''; }, 0);
   }
   function dragEnd() {
-    dragCodes = null; $('drops').style.display = 'none';
+    dragCodes = null; $('drops').style.display = 'none'; document.body.classList.remove('dragging');
     document.querySelectorAll('.hl').forEach(function (x) { x.classList.remove('hl'); });
     var dn = document.querySelector('.nav[data-drop="delete"]'); if (dn && !data.items.some(binned) && state.view !== 'deleted') dn.style.display = 'none';
   }
   function dropOn(node, to) {
     node.dataset.drop = to;
     node.addEventListener('dragover', function (e) { if (!dragCodes) return; e.preventDefault(); node.classList.add('hl'); });
-    node.addEventListener('dragleave', function () { node.classList.remove('hl'); });
+    node.addEventListener('dragleave', function (e) { if (!node.contains(e.relatedTarget)) node.classList.remove('hl'); });
     node.addEventListener('drop', function (e) {
       if (!dragCodes) return; e.preventDefault();
       var codes = dragCodes; dragEnd(); $('clear').onclick();
@@ -313,6 +319,9 @@ h2.pickable:hover { background: var(--hover); color: var(--text); }
       if (to === 'forever' || (del && to === 'delete')) return forever(codes.filter(function (c) { return trash[c]; }));
       if (to === 'delete') return remove(codes);
       var ok = codes.filter(function (c) { var it = byCode[c.toUpperCase()]; return it && ICONLIKE[it.kind] && it.status !== 'live' && !(to === 'waiting' && it.kind === 'set'); });
+      var moved = ok.filter(function (c) { return st(byCode[c.toUpperCase()]) !== to; });
+      if (ok.length && !moved.length) return;   // dropped where they already are
+      ok = moved;
       if (!ok.length) return toast(to === 'waiting' ? 'Only proposals can wait; live icons stay live' : 'Only icons that are not live can move');
       mark(ok, to);
     });
@@ -440,7 +449,7 @@ h2.pickable:hover { background: var(--hover); color: var(--text); }
     var box = $('content'); box.innerHTML = ''; $('main').scrollTop = 0;
     if (!items.length) { box.appendChild(el('p', 'empty', 'Nothing here.')); return; }
     var groups = [];
-    function group(title, sub, list) { if (list.length) groups.push([title, sub, list]); }
+    function group(title, sub, list, keep) { if (list.length || keep) groups.push([title, sub, list]); }   // keep: an empty group to drop into
     var desc = function (a, b) { return num(b) - num(a); };
     if (v === 'deleted') {
       // icons and other images apart, so the icons keep the tile size of the project pages
@@ -455,8 +464,8 @@ h2.pickable:hover { background: var(--hover); color: var(--text); }
       group('Liked', '', items.filter(function (it) { return it.group === 'liked'; }));
     } else {
       group('Live', '', items.filter(function (it) { return st(it) === 'live'; }));
-      group('Top', '', items.filter(function (it) { return st(it) === 'top'; }));
-      group('Kept', '', items.filter(function (it) { return st(it) === 'kept'; }).sort(desc));
+      group('Top', '', items.filter(function (it) { return st(it) === 'top'; }), true);
+      group('Kept', '', items.filter(function (it) { return st(it) === 'kept'; }).sort(desc), true);
       var wait = items.filter(function (it) { return st(it) === 'waiting'; }), batches = {};
       wait.forEach(function (it) { (batches[it.batch] = batches[it.batch] || []).push(it); });
       Object.keys(batches).map(function (b) { return batches[b]; })
@@ -466,13 +475,18 @@ h2.pickable:hover { background: var(--hover); color: var(--text); }
           var lo = list[0].code, hi = list[list.length - 1].code.split('-')[1];
           group('Waiting', list.length > 1 ? lo + ' to ' + hi : lo, list);
         });
+      if (!wait.length) group('Waiting', '', [], true);
       group('Sources', 'images traced or drawn from', items.filter(function (it) { return st(it) === 'source'; }));
     }
     groups.forEach(function (g) {
+      // in a project, the Top, Kept and Waiting groups take icons dropped anywhere on them (user, 2026-11-07);
+      // an empty Top or Kept shows only while dragging
+      var to = p && { Top: 'top', Kept: 'kept', Waiting: 'waiting' }[g[0]], sec = box.appendChild(el('section', to ? 'zone' + (g[2].length ? '' : ' ph') : ''));
+      if (to) dropOn(sec, to);
       var h = el('h2', 'pickable', g[0]); if (g[1]) h.appendChild(el('span', 'sub', g[1])); h.title = 'Select all of these';
-      var to = { Top: 'top', Kept: 'kept', Waiting: 'waiting' }[g[0]]; if (to) dropOn(h, to);
-      box.appendChild(el('div')).appendChild(h);
-      var grid = el('div', 'grid' + (g[2].every(function (it) { return ICONLIKE[it.kind]; }) ? '' : ' free')); g[2].forEach(function (it) { grid.appendChild(card(it)); }); box.appendChild(grid);
+      sec.appendChild(el('div')).appendChild(h);
+      if (!g[2].length) { sec.appendChild(el('div', 'hole', 'Drop here')); return; }
+      var grid = el('div', 'grid' + (g[2].every(function (it) { return ICONLIKE[it.kind]; }) ? '' : ' free')); g[2].forEach(function (it) { grid.appendChild(card(it)); }); sec.appendChild(grid);
       h.onclick = function () {   // the whole group at once; a second click unselects it
         var all = g[2].every(function (it) { return picked.indexOf(it.code) >= 0; });
         g[2].forEach(function (it) {
