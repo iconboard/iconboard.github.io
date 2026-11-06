@@ -88,6 +88,7 @@ h2.pickable:hover { background: var(--hover); color: var(--text); }
 #drops { position: fixed; top: 14px; left: 50%; transform: translateX(-50%); display: none; gap: 8px; z-index: 40; background: #2a2a2a; border: 1px solid var(--line); border-radius: 14px; padding: 8px; box-shadow: 0 10px 30px rgba(0,0,0,.4); }
 #drops div { padding: 10px 18px; border: 1px dashed #555; border-radius: 10px; color: var(--muted); font-size: 13.5px; }
 #drops div.hl, .nav.hl { background: #3d3d3d; color: var(--text); border-color: #999; }
+#caret { position: fixed; width: 2px; border-radius: 1px; background: #bbb; display: none; z-index: 30; pointer-events: none; }
 section.ph { display: none; } body.dragging section.ph { display: block; }
 section.ph .hole { height: 90px; border-radius: 10px; display: flex; align-items: center; justify-content: center; color: var(--faint); font-size: 13px; }
 #ghost { position: fixed; top: -100px; left: 0; padding: 5px 10px; background: #3a3a3a; color: var(--text); border-radius: 8px; font-size: 13px; }
@@ -173,7 +174,7 @@ section.ph .hole { height: 90px; border-radius: 10px; display: flex; align-items
   <button class="btn main" id="copy">Copy codes</button><button class="btn" id="del">Delete</button><button class="btn" id="forever" style="display:none">Delete forever</button><button class="btn" id="clear">Clear</button></div>
 <div id="detail"><div class="box"><div class="view"><img id="big" alt=""></div><div class="info" id="info"></div></div></div>
 <div id="toast"></div>
-<div id="drops"></div><div id="ghost"></div>
+<div id="drops"></div><div id="caret"></div><div id="ghost"></div>
 <div id="ctx"></div>
 
 <script>
@@ -288,7 +289,27 @@ section.ph .hole { height: 90px; border-radius: 10px; display: flex; align-items
   // dragging icons (user, 2026-11-07): the picked icons, or the one under the pointer, go to the group they are
   // dropped on (Top, Kept, Waiting, as the keys T, K, W; any Waiting batch means Waiting, in the icon's own batch),
   // to Top or Deleted in the list; in Deleted: Restore or Delete forever at the top
-  var dragCodes = null;
+  var dragCodes = null, places = {};
+  // places.json (user, 2026-11-07): the order the user set by dragging inside Top and Kept, {"<project>/top": [codes]};
+  // icons not in it come first, in the group's own order (Kept: newest number first); Waiting stays in number order inside its batch
+  function placed(list, key) {
+    var at = places[key] || [], pos = function (it) { return at.indexOf(it.code); };
+    return list.slice().sort(function (a, b) { var i = pos(a), j = pos(b); return (i < 0 && j < 0) ? 0 : i < 0 ? -1 : j < 0 ? 1 : i - j; });
+  }
+  function slot(sec, x, y) {   // the card the drop goes in front of (null: at the end), skipping the dragged ones
+    var cards = [].slice.call(sec.querySelectorAll('.card')).filter(function (c) { return dragCodes.indexOf(c.dataset.code) < 0; });
+    for (var i = 0; i < cards.length; i++) {
+      var r = cards[i].getBoundingClientRect();
+      if (y < r.top || (y <= r.bottom && x < r.left + r.width / 2)) return { card: cards[i], cards: cards };
+    }
+    return { card: null, cards: cards };
+  }
+  function caret(sec, x, y) {
+    var c = $('caret'), s = slot(sec, x, y), ref = s.card || s.cards[s.cards.length - 1];
+    if (!ref) { c.style.display = 'none'; return; }
+    var r = ref.getBoundingClientRect();
+    c.style.left = (s.card ? r.left - 7 : r.right + 5) + 'px'; c.style.top = r.top + 'px'; c.style.height = r.height + 'px'; c.style.display = 'block';
+  }
   var ZONES = { top: 'Top', kept: 'Kept', waiting: 'Waiting', 'delete': 'Delete', restore: 'Restore', forever: 'Delete forever' };
   function dragStart(e, code, c) {
     if (picked.indexOf(code) < 0) { $('clear').onclick(); pick(code, c); }
@@ -300,16 +321,18 @@ section.ph .hole { height: 90px; border-radius: 10px; display: flex; align-items
     setTimeout(function () { document.body.classList.add('dragging'); if (state.view === 'deleted') d.style.display = 'flex'; var dn = document.querySelector('.nav[data-drop="delete"]'); if (dn && state.view !== 'deleted') dn.style.display = ''; }, 0);
   }
   function dragEnd() {
-    dragCodes = null; $('drops').style.display = 'none'; document.body.classList.remove('dragging');
+    dragCodes = null; $('drops').style.display = 'none'; $('caret').style.display = 'none'; document.body.classList.remove('dragging');
     document.querySelectorAll('.hl').forEach(function (x) { x.classList.remove('hl'); });
     var dn = document.querySelector('.nav[data-drop="delete"]'); if (dn && !data.items.some(binned) && state.view !== 'deleted') dn.style.display = 'none';
   }
   function dropOn(node, to) {
     node.dataset.drop = to;
-    node.addEventListener('dragover', function (e) { if (!dragCodes) return; e.preventDefault(); node.classList.add('hl'); });
-    node.addEventListener('dragleave', function (e) { if (!node.contains(e.relatedTarget)) node.classList.remove('hl'); });
+    var ordered = node.tagName === 'SECTION' && (to === 'top' || to === 'kept');
+    node.addEventListener('dragover', function (e) { if (!dragCodes) return; e.preventDefault(); node.classList.add('hl'); if (ordered) caret(node, e.clientX, e.clientY); });
+    node.addEventListener('dragleave', function (e) { if (!node.contains(e.relatedTarget)) { node.classList.remove('hl'); $('caret').style.display = 'none'; } });
     node.addEventListener('drop', function (e) {
       if (!dragCodes) return; e.preventDefault();
+      var spot = ordered ? slot(node, e.clientX, e.clientY) : null;
       var codes = dragCodes; dragEnd(); $('clear').onclick();
       var del = state.view === 'deleted';
       if (to === 'restore' || (del && to !== 'forever' && to !== 'delete')) return restore(codes.filter(function (c) { return trash[c]; }));
@@ -317,12 +340,23 @@ section.ph .hole { height: 90px; border-radius: 10px; display: flex; align-items
       if (to === 'delete') return remove(codes);
       var ok = codes.filter(function (c) { var it = byCode[c.toUpperCase()]; return it && ICONLIKE[it.kind] && it.status !== 'live' && !(to === 'waiting' && it.kind === 'set'); });
       var moved = ok.filter(function (c) { return st(byCode[c.toUpperCase()]) !== to; });
-      if (ok.length && !moved.length) return;   // dropped where they already are
+      if (spot && ok.length) place(node, spot, ok);
+      if (ok.length && !moved.length) { if (spot) refresh(); return; }   // only the place changed, or nothing
       ok = moved;
       if (!ok.length) return toast(to === 'waiting' ? 'Only proposals can wait; live icons stay live' : 'Only icons that are not live can move');
       mark(ok, to);
     });
     return node;
+  }
+  function place(sec, spot, codes) {   // save the group's order with the dropped icons in front of spot.card
+    var key = state.view + '/' + sec.dataset.drop, list = spot.cards.map(function (c) { return c.dataset.code; });
+    var i = spot.card ? list.indexOf(spot.card.dataset.code) : list.length;
+    list.splice.apply(list, [i, 0].concat(codes));
+    var was = places[key]; if (was && was.join() === list.join()) return;
+    places[key] = list;
+    writeJson('places.json', {}, function (q) { q[key] = list; }, 'Order ' + key + ' (board)').catch(function (e) {
+      if (was) places[key] = was; else delete places[key]; refresh(); failed(e);
+    });
   }
   function forever(codes) {   // as in Gmail's Trash: gone from the board at once, files removed by the data repository's workflow
     var was = {}; codes.forEach(function (c) { was[c] = trash[c]; trash[c] = 'forever'; });
@@ -371,7 +405,7 @@ section.ph .hole { height: 90px; border-radius: 10px; display: flex; align-items
 
   Promise.all([fetch(API + repo + '/contents/index.json', { headers: head, cache: 'no-store' }).then(function (r) {
     refused(r); if (!r.ok) throw new Error('index.json: ' + r.status); return r.json();
-  }), readTrash(), readJson('order.json', []).then(function (o) { order = o; }), readJson('marks.json', {}).then(function (m) { marks = m; })]).then(function (res) {
+  }), readTrash(), readJson('order.json', []).then(function (o) { order = o; }), readJson('marks.json', {}).then(function (m) { marks = m; }), readJson('places.json', {}).then(function (q) { places = q; })]).then(function (res) {
     var d = res[0];
     data = d; sortProjects(); d.items.forEach(function (it) { byCode[it.code.toUpperCase()] = it; });
     $('login').style.display = 'none'; $('app').style.display = 'flex';
@@ -461,8 +495,8 @@ section.ph .hole { height: 90px; border-radius: 10px; display: flex; align-items
       group('Liked', '', items.filter(function (it) { return it.group === 'liked'; }));
     } else {
       group('Live', '', items.filter(function (it) { return st(it) === 'live'; }));
-      group('Top', '', items.filter(function (it) { return st(it) === 'top'; }), true);
-      group('Kept', '', items.filter(function (it) { return st(it) === 'kept'; }).sort(desc), true);
+      group('Top', '', placed(items.filter(function (it) { return st(it) === 'top'; }), v + '/top'), true);
+      group('Kept', '', placed(items.filter(function (it) { return st(it) === 'kept'; }).sort(desc), v + '/kept'), true);
       var wait = items.filter(function (it) { return st(it) === 'waiting'; }), batches = {};
       wait.forEach(function (it) { (batches[it.batch] = batches[it.batch] || []).push(it); });
       Object.keys(batches).map(function (b) { return batches[b]; })
