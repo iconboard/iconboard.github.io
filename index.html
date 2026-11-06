@@ -84,6 +84,11 @@ h2.pickable:hover { background: var(--hover); color: var(--text); }
 .card.sel .tick { background: #777; border-color: #777; }
 .card.sel .tick::after { content: ""; position: absolute; left: 4.5px; top: 1.5px; width: 4px; height: 8px; border: solid #fff; border-width: 0 2px 2px 0; transform: rotate(45deg); }
 .empty { color: var(--muted); padding: 40px 0; }
+/* dragging icons: drop on a zone of the strip, a group heading (Top, Kept, Waiting) or Top / Deleted in the list */
+#drops { position: fixed; top: 14px; left: 50%; transform: translateX(-50%); display: none; gap: 8px; z-index: 40; background: #2a2a2a; border: 1px solid var(--line); border-radius: 14px; padding: 8px; box-shadow: 0 10px 30px rgba(0,0,0,.4); }
+#drops div { padding: 10px 18px; border: 1px dashed #555; border-radius: 10px; color: var(--muted); font-size: 13.5px; }
+#drops div.hl, h2.hl, .nav.hl { background: #3d3d3d; color: var(--text); border-color: #999; }
+#ghost { position: fixed; top: -100px; left: 0; padding: 5px 10px; background: #3a3a3a; color: var(--text); border-radius: 8px; font-size: 13px; }
 
 /* selection bar */
 #bar { position: fixed; left: 50%; bottom: 22px; transform: translateX(-50%); display: none; align-items: center; gap: 12px; background: #2a2a2a; border: 1px solid var(--line); border-radius: 16px; padding: 10px 12px 10px 18px; box-shadow: 0 10px 30px rgba(0,0,0,.4); z-index: 20; max-width: calc(100% - 32px); }
@@ -166,6 +171,7 @@ h2.pickable:hover { background: var(--hover); color: var(--text); }
   <button class="btn main" id="copy">Copy codes</button><button class="btn" id="del">Delete</button><button class="btn" id="forever" style="display:none">Delete forever</button><button class="btn" id="clear">Clear</button></div>
 <div id="detail"><div class="box"><div class="view"><img id="big" alt=""></div><div class="info" id="info"></div></div></div>
 <div id="toast"></div>
+<div id="drops"></div><div id="ghost"></div>
 <div id="ctx"></div>
 
 <script>
@@ -277,6 +283,41 @@ h2.pickable:hover { background: var(--hover); color: var(--text); }
       toast('Restored ' + codes.join(', '));
     }, function (e) { codes.forEach(function (c) { trash[c] = was[c]; }); refresh(); failed(e); });
   }
+  // dragging icons (user, 2026-11-07): the picked icons, or the one under the pointer, go where they are dropped:
+  // Top, Kept, Waiting (as the keys T, K, W), Delete; in Deleted: Restore or Delete forever
+  var dragCodes = null;
+  var ZONES = { top: 'Top', kept: 'Kept', waiting: 'Waiting', 'delete': 'Delete', restore: 'Restore', forever: 'Delete forever' };
+  function dragStart(e, code, c) {
+    if (picked.indexOf(code) < 0) { $('clear').onclick(); pick(code, c); }
+    dragCodes = picked.slice();
+    e.dataTransfer.setData('application/x-board-codes', dragCodes.join(',')); e.dataTransfer.effectAllowed = 'move';
+    var g = $('ghost'); g.textContent = dragCodes.length > 1 ? dragCodes.length + ' icons' : code; e.dataTransfer.setDragImage(g, -10, -10);
+    var d = $('drops'); d.innerHTML = '';
+    (state.view === 'deleted' ? ['restore', 'forever'] : ['top', 'kept', 'waiting', 'delete']).forEach(function (k) { dropOn(d.appendChild(el('div', '', ZONES[k])), k); });
+    setTimeout(function () { d.style.display = 'flex'; var dn = document.querySelector('.nav[data-drop="delete"]'); if (dn && state.view !== 'deleted') dn.style.display = ''; }, 0);
+  }
+  function dragEnd() {
+    dragCodes = null; $('drops').style.display = 'none';
+    document.querySelectorAll('.hl').forEach(function (x) { x.classList.remove('hl'); });
+    var dn = document.querySelector('.nav[data-drop="delete"]'); if (dn && !data.items.some(binned) && state.view !== 'deleted') dn.style.display = 'none';
+  }
+  function dropOn(node, to) {
+    node.dataset.drop = to;
+    node.addEventListener('dragover', function (e) { if (!dragCodes) return; e.preventDefault(); node.classList.add('hl'); });
+    node.addEventListener('dragleave', function () { node.classList.remove('hl'); });
+    node.addEventListener('drop', function (e) {
+      if (!dragCodes) return; e.preventDefault();
+      var codes = dragCodes; dragEnd(); $('clear').onclick();
+      var del = state.view === 'deleted';
+      if (to === 'restore' || (del && to !== 'forever' && to !== 'delete')) return restore(codes.filter(function (c) { return trash[c]; }));
+      if (to === 'forever' || (del && to === 'delete')) return forever(codes.filter(function (c) { return trash[c]; }));
+      if (to === 'delete') return remove(codes);
+      var ok = codes.filter(function (c) { var it = byCode[c.toUpperCase()]; return it && ICONLIKE[it.kind] && it.status !== 'live' && !(to === 'waiting' && it.kind === 'set'); });
+      if (!ok.length) return toast(to === 'waiting' ? 'Only proposals can wait; live icons stay live' : 'Only icons that are not live can move');
+      mark(ok, to);
+    });
+    return node;
+  }
   function forever(codes) {   // as in Gmail's Trash: gone from the board at once, files removed by the data repository's workflow
     var was = {}; codes.forEach(function (c) { was[c] = trash[c]; trash[c] = 'forever'; });
     refresh();
@@ -346,10 +387,10 @@ h2.pickable:hover { background: var(--hover); color: var(--text); }
       return a;
     }
     nav('live', 'Live on sites', count(function (it) { return st(it) === 'live'; }));
-    nav('top', 'Top', count(function (it) { return st(it) === 'top' || st(it) === 'live'; }));
+    dropOn(nav('top', 'Top', count(function (it) { return st(it) === 'top' || st(it) === 'live'; })), 'top');
     nav('inspiration', 'Inspiration', count(function (it) { return it.project === 'inspiration'; }));
     var nDel = data.items.filter(binned).length;
-    if (nDel || state.view === 'deleted') nav('deleted', 'Deleted', nDel);
+    var dn = nav('deleted', 'Deleted', nDel); dn.style.display = nDel || state.view === 'deleted' || dragCodes ? '' : 'none'; dropOn(dn, 'delete');
     s.appendChild(el('div', 'label', 'Projects'));
     data.projects.forEach(function (p) {
       var a = nav(p.id, p.title, count(function (it) { return it.project === p.id; }));
@@ -357,11 +398,13 @@ h2.pickable:hover { background: var(--hover); color: var(--text); }
       a.ondragstart = function (e) { e.dataTransfer.setData('text/plain', p.id); e.dataTransfer.effectAllowed = 'move'; a.classList.add('drag'); };
       a.ondragend = function () { a.classList.remove('drag'); };
       a.ondragover = function (e) {
+        if (dragCodes) return;
         e.preventDefault(); var r = a.getBoundingClientRect(), low = e.clientY > r.top + r.height / 2;
         a.classList.toggle('drop-above', !low); a.classList.toggle('drop-below', low);
       };
       a.ondragleave = function () { a.classList.remove('drop-above', 'drop-below'); };
       a.ondrop = function (e) {
+        if (dragCodes) return;
         e.preventDefault(); var id = e.dataTransfer.getData('text/plain'), low = a.classList.contains('drop-below');
         a.classList.remove('drop-above', 'drop-below');
         if (!id || id === p.id) return;
@@ -427,6 +470,7 @@ h2.pickable:hover { background: var(--hover); color: var(--text); }
     }
     groups.forEach(function (g) {
       var h = el('h2', 'pickable', g[0]); if (g[1]) h.appendChild(el('span', 'sub', g[1])); h.title = 'Select all of these';
+      var to = { Top: 'top', Kept: 'kept', Waiting: 'waiting' }[g[0]]; if (to) dropOn(h, to);
       box.appendChild(el('div')).appendChild(h);
       var grid = el('div', 'grid' + (g[2].every(function (it) { return ICONLIKE[it.kind]; }) ? '' : ' free')); g[2].forEach(function (it) { grid.appendChild(card(it)); }); box.appendChild(grid);
       h.onclick = function () {   // the whole group at once; a second click unselects it
@@ -457,6 +501,9 @@ h2.pickable:hover { background: var(--hover); color: var(--text); }
     if (t) m.appendChild(el('span', 't', t));
     if ((st(it) === 'live' || st(it) === 'top') && !(cross && state.view === 'live')) m.appendChild(el('span', 'badge', st(it)));
     c.onclick = function () { pick(it.code, c); last = it.code; };
+    c.draggable = true; img.draggable = false;
+    c.ondragstart = function (e) { dragStart(e, it.code, c); };
+    c.ondragend = dragEnd;
     c.oncontextmenu = function (e) { menu(e, it); };
     c.ondblclick = function () { if (picked.indexOf(it.code) < 0) pick(it.code, c); open(it); };
     return c;
