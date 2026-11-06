@@ -110,7 +110,7 @@ h2 .sub { font-weight: 400; color: var(--faint); margin-left: 6px; }
 .acts { display: flex; gap: 8px; margin-top: 16px; flex-wrap: wrap; }
 #toast button { margin-left: 12px; border: 0; background: none; text-decoration: underline; cursor: pointer; padding: 0; }
 .note { color: var(--faint); font-size: 13px; margin: 10px 0 0; }
-#toast { position: fixed; top: 18px; left: 50%; transform: translateX(-50%); background: #3a3a3a; color: var(--text); padding: 8px 14px; border-radius: 10px; font-size: 14px; display: none; z-index: 60; }
+#toast { position: fixed; top: 18px; left: 50%; transform: translateX(-50%); max-width: min(560px, calc(100% - 32px)); background: #3a3a3a; color: var(--text); padding: 8px 14px; border-radius: 10px; font-size: 14px; display: none; z-index: 60; }
 
 @media (max-width: 760px) {
   #side { position: fixed; inset: 0 auto 0 0; z-index: 40; transform: translateX(-100%); transition: transform .2s; box-shadow: 0 0 40px rgba(0,0,0,.5); }
@@ -237,8 +237,9 @@ h2 .sub { font-weight: 400; color: var(--faint); margin-left: 6px; }
         return fetch(API + repo + '/contents/' + path, { method: 'PUT', headers: jhead, body: JSON.stringify(body) });
       }).then(function (r) {
         if (r.status === 409 && !again) return go(true);
-        if (r.status === 403 || r.status === 404) throw new Error('read-only');
-        if (!r.ok) throw new Error('save failed: ' + r.status);
+        if (!r.ok) return r.json().catch(function () { return {}; }).then(function (j) {
+          var e = new Error((j.message || 'error') + ' (' + r.status + ')'); e.readOnly = r.status === 403 || r.status === 404; throw e;
+        });
         return r.json().then(function (j) { shas[path] = j.content.sha; });
       });
     };
@@ -262,9 +263,9 @@ h2 .sub { font-weight: 400; color: var(--faint); margin-left: 6px; }
     }, function (e) { codes.forEach(function (c) { trash[c] = was[c]; }); refresh(); failed(e); });
   }
   function failed(e) {
-    toast(e.message === 'read-only' ? 'Not saved: this token can only read. Deleting needs Contents: Read and write.' : 'Not saved: ' + e.message);
+    toast(e.readOnly ? 'Not saved. GitHub says: ' + e.message + '. The token needs Contents: Read and write on the data repository.' : 'Not saved: ' + e.message, 'OK', function () {});
   }
-  function refresh() { side(); show(); }
+  function refresh() { var y = $('main').scrollTop, z = $('side').scrollTop; side(); show(); $('main').scrollTop = y; $('side').scrollTop = z; }
   function gone(it) { return !!trash[it.code]; }
   // the project list in the user's order (order.json, written by dragging); projects not in it keep their place at the end
   function sortProjects() {
@@ -431,7 +432,7 @@ h2 .sub { font-weight: 400; color: var(--faint); margin-left: 6px; }
   function toast(t, label, act) {
     var e = $('toast'); e.textContent = t; e.style.display = 'block';
     if (label) { var b = el('button', '', label); b.onclick = function () { e.style.display = 'none'; act(); }; e.appendChild(b); }
-    clearTimeout(toast.t); toast.t = setTimeout(function () { e.style.display = 'none'; }, label ? 6000 : 2200);
+    clearTimeout(toast.t); toast.t = setTimeout(function () { e.style.display = 'none'; }, label === "OK" ? 15000 : label ? 6000 : 2200);
   }
 
   function open(it) {
