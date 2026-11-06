@@ -271,9 +271,24 @@ section.ph .hole { height: 90px; border-radius: 10px; display: flex; align-items
   }
   function readTrash() { return readJson('trash.json', {}).then(function (t) { trash = t; }); }
   function writeTrash(change, message) { return writeJson('trash.json', {}, function (t) { change(t); }, message); }
+  // Cmd+Z / Ctrl+Z (user, 2026-11-07): takes back the last change on the board, step by step: delete, restore, moves to
+  // Top, Kept or Waiting, the order in Top and Kept, the project list. Delete forever cannot be taken back.
+  var undos = [], undoing = false;
+  function did(label, back) { if (undoing) return; undos.push([label, back]); if (undos.length > 50) undos.shift(); }
+  function undo() {
+    var u = undos.pop(); if (!u) return toast('Nothing to undo');
+    undoing = true; try { u[1](); } finally { undoing = false; }
+    toast('Undone: ' + u[0]);
+  }
+  function joinUndos(n, label) {   // the steps since n become one (a drop that moves and places)
+    var steps = undos.splice(n); if (!steps.length) return;
+    if (steps.length === 1) return undos.push(steps[0]);
+    undos.push([label, function () { steps.slice().reverse().forEach(function (u) { u[1](); }); }]);
+  }
   function remove(codes, undo) {
     var at = new Date().toISOString();
     codes.forEach(function (c) { trash[c] = at; });
+    did('delete ' + codes.join(', '), function () { restore(codes); });
     refresh();
     writeTrash(function (t) { codes.forEach(function (c) { t[c] = at; }); }, 'Delete ' + codes.join(', ') + ' (board)').then(function () {
       if (undo !== false) toast('Deleted ' + codes.join(', '), 'Undo', function () { restore(codes); });
@@ -281,6 +296,7 @@ section.ph .hole { height: 90px; border-radius: 10px; display: flex; align-items
   }
   function restore(codes) {
     var was = {}; codes.forEach(function (c) { was[c] = trash[c]; delete trash[c]; });
+    did('restore ' + codes.join(', '), function () { remove(codes, false); });
     refresh();
     writeTrash(function (t) { codes.forEach(function (c) { delete t[c]; }); }, 'Restore ' + codes.join(', ') + ' (board)').then(function () {
       toast('Restored ' + codes.join(', '));
@@ -341,7 +357,8 @@ section.ph .hole { height: 90px; border-radius: 10px; display: flex; align-items
       if (to === 'forever' || (del && to === 'delete')) return forever(codes.filter(function (c) { return trash[c]; }));
       if (to === 'delete') return remove(codes);
       var ok = codes.filter(function (c) { var it = byCode[c.toUpperCase()]; return it && ICONLIKE[it.kind] && it.status !== 'live' && !(to === 'waiting' && it.kind === 'set'); });
-      var moved = ok.filter(function (c) { return st(byCode[c.toUpperCase()]) !== to; });
+      var moved = ok.filter(function (c) { return st(byCode[c.toUpperCase()]) !== to; }), n = undos.length;
+      setTimeout(function () { joinUndos(n, 'move ' + ok.join(', ') + ' to ' + to); }, 0);
       if (spot && ok.length) place(node, spot, ok);
       if (ok.length && !moved.length) { if (spot) refresh(); return; }   // only the place changed, or nothing
       ok = moved;
@@ -356,12 +373,17 @@ section.ph .hole { height: 90px; border-radius: 10px; display: flex; align-items
     list.splice.apply(list, [i, 0].concat(codes));
     var was = places[key]; if (was && was.join() === list.join()) return;
     places[key] = list;
+    did('order', function () {
+      if (was) places[key] = was; else delete places[key]; refresh();
+      writeJson('places.json', {}, function (q) { if (was) q[key] = was; else delete q[key]; }, 'Order ' + key + ' (undo, board)').catch(failed);
+    });
     writeJson('places.json', {}, function (q) { q[key] = list; }, 'Order ' + key + ' (board)').catch(function (e) {
       if (was) places[key] = was; else delete places[key]; refresh(); failed(e);
     });
   }
   function forever(codes) {   // as in Gmail's Trash: gone from the board at once, files removed by the data repository's workflow
     var was = {}; codes.forEach(function (c) { was[c] = trash[c]; trash[c] = 'forever'; });
+    undos = [];   // what came before cannot be taken back across a Delete forever
     refresh();
     writeTrash(function (t) { codes.forEach(function (c) { t[c] = 'forever'; }); }, 'Delete forever ' + codes.join(', ') + ' (board)').then(function () {
       toast('Deleted forever ' + codes.join(', '));
@@ -380,14 +402,16 @@ section.ph .hole { height: 90px; border-radius: 10px; display: flex; align-items
     codes = codes.filter(function (c) { var it = byCode[c.toUpperCase()]; return it && ICONLIKE[it.kind] && it.status !== 'live'; });
     if (!codes.length) return;
     var was = {}; codes.forEach(function (c) { was[c] = marks[c]; var it = byCode[c.toUpperCase()]; if (it.status === to) delete marks[c]; else marks[c] = to; });
+    var back = function () {
+      codes.forEach(function (c) { if (was[c]) marks[c] = was[c]; else delete marks[c]; }); refresh();
+      writeJson('marks.json', {}, function (m) { codes.forEach(function (c) { if (was[c]) m[c] = was[c]; else delete m[c]; }); }, 'Undo mark (board)').catch(failed);
+    };
+    did('move ' + codes.join(', ') + ' to ' + to, back);
     refresh();
     writeJson('marks.json', {}, function (m) {
       codes.forEach(function (c) { if (marks[c]) m[c] = marks[c]; else delete m[c]; });
     }, 'Mark ' + codes.join(', ') + ' ' + to + ' (board)').then(function () {
-      toast(codes.join(', ') + ': ' + to, 'Undo', function () {
-        codes.forEach(function (c) { if (was[c]) marks[c] = was[c]; else delete marks[c]; }); refresh();
-        writeJson('marks.json', {}, function (m) { codes.forEach(function (c) { if (was[c]) m[c] = was[c]; else delete m[c]; }); }, 'Undo mark (board)').catch(failed);
-      });
+      toast(codes.join(', ') + ': ' + to, 'Undo', function () { var i = undos.map(function (u) { return u[1]; }).indexOf(back); if (i >= 0) undos.splice(i, 1); back(); });
     }, function (e) { codes.forEach(function (c) { if (was[c]) marks[c] = was[c]; else delete marks[c]; }); refresh(); failed(e); });
   }
   // the project list in the user's order (order.json, written by dragging); projects not in it keep their place at the end
@@ -400,6 +424,10 @@ section.ph .hole { height: 90px; border-radius: 10px; display: flex; align-items
     var ids = data.projects.map(function (p) { return p.id; }).filter(function (x) { return x !== id; });
     var k = before ? ids.indexOf(before) : ids.length; ids.splice(k < 0 ? ids.length : k, 0, id);
     var old = order; order = ids; sortProjects(); side();
+    did('project order', function () {
+      order = old; sortProjects(); side();
+      writeJson('order.json', [], function () { return old; }, 'Project order (undo, board)').catch(failed);
+    });
     writeJson('order.json', [], function () { return ids; }, 'Project order (board)').catch(function (e) {
       order = old; sortProjects(); side(); failed(e);
     });
@@ -683,6 +711,7 @@ section.ph .hole { height: 90px; border-radius: 10px; display: flex; align-items
   $('detail').onclick = function (e) { if (e.target === this) close(); };
   var current = null, last = null;
   document.addEventListener('keydown', function (e) {
+    if (e.target.tagName !== 'INPUT' && (e.metaKey || e.ctrlKey) && !e.shiftKey && e.key.toLowerCase() === 'z') { e.preventDefault(); return undo(); }
     if (e.target.tagName === 'INPUT' || e.metaKey || e.ctrlKey || e.altKey) return;
     if (e.key === 'Escape' && $('ctx').style.display === 'block') return hide();
     var open_ = $('detail').style.display === 'flex';
