@@ -1,0 +1,402 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<meta name="color-scheme" content="dark">
+<title>Logo board</title>
+<link rel="icon" href="favicon.ico" sizes="32x32">
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<style>
+:root {
+  --bg: #1c1c1c; --side: #181818; --card: #262626; --hover: #2e2e2e; --line: #303030;
+  --text: #ececec; --muted: #9a9a9a; --faint: #6c6c6c; --accent: #d97757; --blue: #4a8fe7;
+  --live: #6bbf73; --final: #d97757;
+  --font: ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, Roboto, Helvetica, Arial, sans-serif;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text); font: 15px/1.45 var(--font); }
+button, input { font: inherit; color: inherit; }
+a { color: inherit; }
+
+/* sign in */
+#login { position: fixed; inset: 0; display: none; align-items: center; justify-content: center; padding: 16px; background: var(--bg); z-index: 50; }
+#login form { width: 100%; max-width: 360px; background: var(--card); border: 1px solid var(--line); border-radius: 16px; padding: 28px 24px 24px; }
+#login img { width: 44px; height: 44px; display: block; margin-bottom: 14px; border-radius: 9px; }
+#login h1 { font-size: 20px; font-weight: 600; margin: 0 0 4px; }
+#login p { margin: 0 0 18px; color: var(--muted); font-size: 14px; }
+#login .why { color: #f08a7a; }
+#login input { display: block; width: 100%; margin-bottom: 10px; padding: 10px 12px; background: var(--bg); border: 1px solid var(--line); border-radius: 10px; outline: none; }
+#login input:focus { border-color: #555; }
+#login button { width: 100%; margin-top: 6px; padding: 10px; border: 0; border-radius: 10px; background: var(--text); color: #1c1c1c; font-weight: 600; cursor: pointer; }
+
+/* frame */
+#app { display: none; height: 100%; }
+#side { width: 264px; flex: none; background: var(--side); border-right: 1px solid var(--line); display: flex; flex-direction: column; overflow-y: auto; padding: 14px 10px; }
+.brand { display: flex; align-items: center; gap: 10px; padding: 4px 10px 16px; font-size: 18px; font-weight: 600; }
+.brand img { width: 26px; height: 26px; border-radius: 6px; }
+.label { padding: 14px 10px 6px; color: var(--muted); font-size: 13px; }
+.nav { display: flex; align-items: center; gap: 10px; width: 100%; padding: 8px 10px; border: 0; border-radius: 10px; background: none; text-align: left; cursor: pointer; }
+.nav:hover { background: var(--hover); }
+.nav.on { background: #2c2c2c; }
+.nav .n { margin-left: auto; color: var(--faint); font-size: 13px; }
+.nav .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--live); flex: none; }
+.nav .ico { width: 18px; height: 18px; border-radius: 4px; flex: none; background: #333; object-fit: contain; }
+#main { flex: 1; overflow-y: auto; min-width: 0; }
+header { position: sticky; top: 0; z-index: 5; background: rgba(28,28,28,.94); backdrop-filter: blur(8px); border-bottom: 1px solid var(--line); padding: 14px 28px 12px; }
+.top { display: flex; align-items: center; gap: 12px; }
+#title { font-size: 19px; font-weight: 600; margin: 0; }
+#menu { display: none; border: 0; background: none; padding: 4px 6px; cursor: pointer; font-size: 20px; }
+#find { margin-left: auto; width: 180px; padding: 7px 12px; background: var(--card); border: 1px solid var(--line); border-radius: 10px; outline: none; }
+.chips { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 10px; }
+.chip { border: 1px solid var(--line); background: none; border-radius: 999px; padding: 4px 12px; font-size: 13px; color: var(--muted); cursor: pointer; }
+.chip.on { background: var(--text); color: #1c1c1c; border-color: var(--text); }
+.chip .n { opacity: .65; margin-left: 4px; }
+#content { padding: 8px 28px 120px; }
+h2 { font-size: 14px; font-weight: 600; color: var(--muted); margin: 26px 0 10px; }
+h2 .sub { font-weight: 400; color: var(--faint); margin-left: 6px; }
+.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 14px; }
+.grid .card { margin: 0; }
+.grid.free { display: block; columns: 220px; column-gap: 14px; }
+.grid.free .card { margin: 0 0 14px; }
+.grid.free img { width: 100%; }
+.card { break-inside: avoid; margin: 0 0 14px; background: var(--card); border: 1px solid transparent; border-radius: 14px; overflow: hidden; cursor: pointer; position: relative; display: block; width: 100%; padding: 0; text-align: left; }
+.card:hover { background: var(--hover); }
+.card.sel { border-color: var(--accent); }
+.card .pic { padding: 18px; display: flex; align-items: center; justify-content: center; }
+.card.icon .pic { aspect-ratio: 1; }
+.card img { max-width: 100%; display: block; }
+.card.icon img { width: 100%; height: 100%; object-fit: contain; }
+.card.big { column-span: none; }
+.card .meta { display: flex; align-items: center; gap: 8px; padding: 0 12px 10px; font-size: 13px; }
+.card .code { font-weight: 600; letter-spacing: .01em; white-space: nowrap; flex: none; }
+.card .t { color: var(--faint); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.badge { margin-left: auto; font-size: 11px; padding: 1px 7px; border-radius: 999px; white-space: nowrap; }
+.badge.live { background: rgba(107,191,115,.16); color: var(--live); }
+.badge.final { background: rgba(217,119,87,.16); color: var(--final); }
+.tick { position: absolute; top: 8px; left: 8px; width: 22px; height: 22px; border-radius: 50%; border: 1.5px solid #888; background: rgba(0,0,0,.35); display: none; }
+.card:hover .tick, .card.sel .tick, body.picking .tick { display: block; }
+@media (hover: none) { .tick { display: block; opacity: .75; } }
+.card.sel .tick { background: var(--accent); border-color: var(--accent); }
+.card.sel .tick::after { content: ""; position: absolute; left: 7px; top: 3px; width: 5px; height: 10px; border: solid #fff; border-width: 0 2px 2px 0; transform: rotate(45deg); }
+.empty { color: var(--muted); padding: 40px 0; }
+
+/* selection bar */
+#bar { position: fixed; left: 50%; bottom: 22px; transform: translateX(-50%); display: none; align-items: center; gap: 12px; background: #2a2a2a; border: 1px solid var(--line); border-radius: 16px; padding: 10px 12px 10px 18px; box-shadow: 0 10px 30px rgba(0,0,0,.4); z-index: 20; max-width: calc(100% - 32px); }
+#bar .codes { color: var(--muted); font-size: 13px; max-width: 360px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.btn { border: 0; border-radius: 10px; padding: 7px 14px; cursor: pointer; background: var(--hover); }
+.btn.main { background: var(--text); color: #1c1c1c; font-weight: 600; }
+
+/* detail */
+#detail { position: fixed; inset: 0; background: rgba(0,0,0,.6); display: none; align-items: center; justify-content: center; padding: 16px; z-index: 30; }
+#detail .box { background: var(--card); border: 1px solid var(--line); border-radius: 18px; width: 100%; max-width: 760px; max-height: calc(100% - 32px); overflow-y: auto; display: grid; grid-template-columns: 300px 1fr; }
+#detail .view { background: #202020; display: flex; align-items: center; justify-content: center; padding: 22px; min-height: 300px; }
+#detail .view img { max-width: 256px; max-height: 420px; width: 100%; object-fit: contain; }
+#detail .info { padding: 22px 22px 20px; min-width: 0; }
+#detail .head { display: flex; align-items: center; gap: 10px; }
+#detail .head .code { font-size: 22px; font-weight: 600; }
+#detail .x { margin-left: auto; border: 0; background: none; font-size: 22px; cursor: pointer; color: var(--muted); }
+.row { color: var(--muted); font-size: 14px; margin: 4px 0; }
+.row b { color: var(--text); font-weight: 500; }
+.tabs { margin: 16px 0 6px; display: grid; gap: 8px; }
+.tabbar { border-radius: 10px; padding: 7px 8px 0; display: flex; align-items: flex-end; gap: 8px; }
+.tabbar .tab { display: flex; align-items: center; gap: 8px; padding: 7px 12px; border-radius: 8px 8px 0 0; font: 12px/1 var(--font); }
+.tabbar img { width: 16px; height: 16px; }
+.tabbar img.x2 { width: 32px; height: 32px; margin-left: auto; align-self: center; margin-bottom: 7px; }
+.tabbar.light { background: #dfe1e5; } .tabbar.light .tab { background: #fff; color: #333; }
+.tabbar.dark { background: #202124; } .tabbar.dark .tab { background: #35363a; color: #ddd; }
+.files { margin-top: 14px; font-size: 13px; }
+.files a { display: block; color: var(--muted); padding: 2px 0; text-decoration: none; cursor: pointer; }
+.files a:hover { color: var(--text); }
+.acts { display: flex; gap: 8px; margin-top: 16px; flex-wrap: wrap; }
+#toast { position: fixed; top: 18px; left: 50%; transform: translateX(-50%); background: var(--text); color: #1c1c1c; padding: 8px 14px; border-radius: 10px; font-size: 14px; display: none; z-index: 60; }
+
+@media (max-width: 760px) {
+  #side { position: fixed; inset: 0 auto 0 0; z-index: 40; transform: translateX(-100%); transition: transform .2s; box-shadow: 0 0 40px rgba(0,0,0,.5); }
+  body.menu #side { transform: none; }
+  #menu { display: block; }
+  header, #content { padding-left: 16px; padding-right: 16px; }
+  #find { width: 120px; }
+  .grid { grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap: 10px; }
+  .grid.free { columns: 150px; column-gap: 10px; }
+  .card { margin-bottom: 10px; }
+  #detail .box { grid-template-columns: 1fr; }
+  #detail .view { min-height: 220px; }
+}
+</style>
+</head>
+<body>
+<div id="login">
+  <form method="post" action="#">
+    <img src="favicon.svg" alt="">
+    <h1>Logo board</h1>
+    <p id="why">Sign in to open the board.</p>
+    <input name="username" autocomplete="username" placeholder="Repository" spellcheck="false">
+    <input name="password" type="password" autocomplete="current-password" placeholder="Token">
+    <button>Open</button>
+  </form>
+</div>
+
+<div id="app">
+  <nav id="side"></nav>
+  <main id="main">
+    <header>
+      <div class="top"><button id="menu" aria-label="Menu">&#9776;</button><h1 id="title"></h1>
+        <input id="find" type="search" placeholder="Go to code" autocomplete="off" spellcheck="false"></div>
+      <div class="chips" id="chips"></div>
+    </header>
+    <div id="content"></div>
+  </main>
+</div>
+
+<div id="bar"><span id="count"></span><span class="codes" id="codes"></span>
+  <button class="btn main" id="copy">Copy codes</button><button class="btn" id="clear">Clear</button></div>
+<div id="detail"><div class="box"><div class="view"><img id="big" alt=""></div><div class="info" id="info"></div></div></div>
+<div id="toast"></div>
+
+<script>
+// The page names no repository: the repository and a read-only token are typed once (a password manager fills them as
+// username and password) and kept in this browser. Files are read through the GitHub API by their git blob sha and
+// kept in the browser's cache, so each file is downloaded once until it changes.
+(function () {
+  var KEY = 'board-access', API = 'https://api.github.com/repos/';
+  var access = null; try { access = localStorage.getItem(KEY); } catch (e) {}
+  var parts = (access || '').trim().split(/\s+/), token = parts[0], repo = parts[1];
+  var $ = function (id) { return document.getElementById(id); };
+
+  function signIn(why) {
+    try { localStorage.removeItem(KEY); } catch (e) {}
+    $('app').style.display = 'none'; $('login').style.display = 'flex';
+    if (why) { $('why').textContent = why; $('why').className = 'why'; }
+    var f = $('login').querySelector('form');
+    f.onsubmit = function (e) {
+      e.preventDefault();
+      try { localStorage.setItem(KEY, f.password.value.trim() + ' ' + f.username.value.trim()); } catch (err) {}
+      location.reload();
+    };
+    f.username.focus();
+  }
+  if (!token || !repo) return signIn('');
+
+  var TYPES = { svg: 'image/svg+xml', png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', webp: 'image/webp',
+                ico: 'image/x-icon', gif: 'image/gif', json: 'application/json' };
+  var head = { Authorization: 'Bearer ' + token, Accept: 'application/vnd.github.raw' };
+  function refused(r) { if (r.status === 401 || r.status === 403 || r.status === 404) { signIn('The token was refused (expired or without access).'); throw new Error('refused'); } }
+  var store = null; try { caches.open('board-blobs').then(function (c) { store = c; }); } catch (e) {}
+  var urls = {}, queue = [], running = 0;
+  function blob(sha, path) {          // a blob URL of the file, from the cache or the API (six at a time)
+    if (urls[sha]) return urls[sha];
+    var type = TYPES[path.split('.').pop().toLowerCase()] || 'application/octet-stream';
+    var key = 'https://board.local/' + sha;
+    urls[sha] = new Promise(function (ok) { queue.push(ok); pump(); }).then(function () {
+      var cached = store ? store.match(key) : Promise.resolve(null);
+      return cached.then(function (hit) {
+        if (hit) return hit.blob();
+        return fetch(API + repo + '/git/blobs/' + sha, { headers: head }).then(function (r) {
+          refused(r); if (!r.ok) throw new Error(path + ': ' + r.status);
+          return r.blob();
+        }).then(function (b) { if (store) store.put(key, new Response(b)); return b; });
+      });
+    }).then(function (b) { running--; pump(); return URL.createObjectURL(b.slice(0, b.size, type)); },
+            function (e) { running--; pump(); throw e; });
+    return urls[sha];
+  }
+  function pump() { while (running < 6 && queue.length) { running++; queue.shift()(); } }
+  var seen = new IntersectionObserver(function (es) {
+    es.forEach(function (e) {
+      if (!e.isIntersecting) return;
+      var img = e.target; seen.unobserve(img);
+      blob(img.dataset.sha, img.dataset.path).then(function (u) { img.src = u; }, function () {});
+    });
+  }, { rootMargin: '600px' });
+  function lazy(img, sha, path) { img.dataset.sha = sha; img.dataset.path = path; seen.observe(img); }
+
+  var data, byCode = {}, picked = [], state = { view: 'linked-trees', status: 'all' };
+  var STATUS = [['all', 'All'], ['live', 'Live'], ['final', 'Final'], ['kept', 'Kept'], ['waiting', 'Waiting'], ['source', 'Sources']];
+  var ICONLIKE = { set: 1, proposal: 1 };
+
+  fetch(API + repo + '/contents/index.json', { headers: head, cache: 'no-store' }).then(function (r) {
+    refused(r); if (!r.ok) throw new Error('index.json: ' + r.status); return r.json();
+  }).then(function (d) {
+    data = d; d.items.forEach(function (it) { byCode[it.code.toUpperCase()] = it; });
+    $('login').style.display = 'none'; $('app').style.display = 'flex';
+    readHash(); side(); show();
+  }).catch(function (e) { if (e.message !== 'refused') { $('content').innerHTML = '<p class="empty">Could not load the board: ' + e.message + '</p>'; $('app').style.display = 'flex'; } });
+
+  function el(tag, cls, text) { var e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; }
+  function count(f) { return data.items.filter(f).length; }
+
+  function side() {
+    var s = $('side'); s.innerHTML = '';
+    var b = el('div', 'brand'); var i = el('img'); i.src = 'favicon.svg'; b.appendChild(i); b.appendChild(el('span', '', 'Logo board')); s.appendChild(b);
+    function nav(id, label, n, mark) {
+      var a = el('button', 'nav' + (state.view === id ? ' on' : ''));
+      if (mark) a.appendChild(mark);
+      a.appendChild(el('span', '', label)); a.appendChild(el('span', 'n', n));
+      a.onclick = function () { state.view = id; state.status = 'all'; document.body.classList.remove('menu'); go(); };
+      s.appendChild(a);
+    }
+    nav('live', 'Live on sites', count(function (it) { return it.status === 'live'; }), el('span', 'dot'));
+    nav('final', 'Finals', count(function (it) { return it.status === 'final' || it.status === 'live'; }));
+    nav('inspiration', 'Inspiration', count(function (it) { return it.project === 'inspiration'; }));
+    s.appendChild(el('div', 'label', 'Projects'));
+    data.projects.forEach(function (p) {
+      var live = data.items.filter(function (it) { return it.project === p.id && it.status === 'live'; })[0];
+      var ico = el('img', 'ico'); var first = live || data.items.filter(function (it) { return it.project === p.id && it.kind === 'set'; })[0];
+      if (first) lazy(ico, first.sha, first.path);
+      nav(p.id, p.title, count(function (it) { return it.project === p.id; }), ico);
+    });
+  }
+
+  function inView() {
+    var v = state.view;
+    return data.items.filter(function (it) {
+      if (v === 'live') return it.status === 'live';
+      if (v === 'final') return it.status === 'final' || it.status === 'live';
+      return it.project === v;
+    });
+  }
+
+  function show() {
+    var v = state.view, all = inView();
+    var p = data.projects.filter(function (p) { return p.id === v; })[0];
+    $('title').textContent = p ? p.title + ' · ' + p.prefix : v === 'live' ? 'Live on sites' : v === 'final' ? 'Finals' : 'Inspiration';
+    var chips = $('chips'); chips.innerHTML = '';
+    if (p) STATUS.forEach(function (s) {
+      var n = s[0] === 'all' ? all.length : all.filter(function (it) { return it.status === s[0]; }).length;
+      if (!n && s[0] !== 'all') return;
+      var c = el('button', 'chip' + (state.status === s[0] ? ' on' : ''), s[1]); c.appendChild(el('span', 'n', n));
+      c.onclick = function () { state.status = s[0]; go(); }; chips.appendChild(c);
+    });
+    var items = state.status === 'all' ? all : all.filter(function (it) { return it.status === state.status; });
+    var box = $('content'); box.innerHTML = ''; $('main').scrollTop = 0;
+    if (!items.length) { box.appendChild(el('p', 'empty', 'Nothing here.')); return; }
+    var groups = [];
+    function group(title, sub, list) { if (list.length) groups.push([title, sub, list]); }
+    var desc = function (a, b) { return num(b) - num(a); };
+    if (v === 'live' || v === 'final') {
+      data.projects.forEach(function (p) { group(p.title, p.prefix, items.filter(function (it) { return it.project === p.id; })); });
+    } else if (v === 'inspiration') {
+      group('Your earlier icons and logos', '', items.filter(function (it) { return it.group === 'own'; }));
+      group('Liked', '', items.filter(function (it) { return it.group === 'liked'; }));
+    } else {
+      group('Live', '', items.filter(function (it) { return it.status === 'live'; }));
+      group('Final', '', items.filter(function (it) { return it.status === 'final'; }));
+      group('Kept', 'sets', items.filter(function (it) { return it.status === 'kept'; }).sort(desc));
+      var wait = items.filter(function (it) { return it.status === 'waiting'; }), batches = {};
+      wait.forEach(function (it) { (batches[it.batch] = batches[it.batch] || []).push(it); });
+      Object.keys(batches).map(function (b) { return batches[b]; })
+        .sort(function (a, b) { return Math.max.apply(null, b.map(num)) - Math.max.apply(null, a.map(num)); })
+        .forEach(function (list) {
+          list.sort(function (a, b) { return num(a) - num(b); });
+          var lo = list[0].code, hi = list[list.length - 1].code.split('-')[1];
+          group('Waiting', list.length > 1 ? lo + ' to ' + hi : lo, list);
+        });
+      group('Sources', 'images traced or drawn from', items.filter(function (it) { return it.status === 'source'; }));
+    }
+    groups.forEach(function (g) {
+      var h = el('h2', '', g[0]); if (g[1]) h.appendChild(el('span', 'sub', g[1])); box.appendChild(h);
+      var grid = el('div', 'grid' + (g[2].every(function (it) { return ICONLIKE[it.kind]; }) ? '' : ' free')); g[2].forEach(function (it) { grid.appendChild(card(it)); }); box.appendChild(grid);
+    });
+  }
+  function num(it) { var m = it.code.match(/(\d+)$/); return m ? +m[1] : 0; }
+
+  function card(it) {
+    var c = el('div', 'card' + (ICONLIKE[it.kind] ? ' icon' : '') + (picked.indexOf(it.code) >= 0 ? ' sel' : ''));
+    c.dataset.code = it.code;
+    var tick = el('span', 'tick'); c.appendChild(tick);
+    var pic = el('div', 'pic'), img = el('img'); img.alt = it.code; pic.appendChild(img); c.appendChild(pic);
+    lazy(img, it.sha, it.path);
+    var m = el('div', 'meta'); m.appendChild(el('span', 'code', it.code));
+    if (it.title && it.kind !== 'proposal') m.appendChild(el('span', 't', it.title));
+    if (it.status === 'live' || it.status === 'final') m.appendChild(el('span', 'badge ' + it.status, it.status));
+    c.appendChild(m);
+    tick.onclick = function (e) { e.stopPropagation(); pick(it.code, c); };
+    c.onclick = function (e) { if (document.body.classList.contains('picking') && (e.metaKey || e.ctrlKey || e.shiftKey)) return pick(it.code, c); open(it); };
+    return c;
+  }
+
+  function pick(code, c) {
+    var i = picked.indexOf(code);
+    if (i >= 0) picked.splice(i, 1); else picked.push(code);
+    if (c) c.classList.toggle('sel', i < 0);
+    document.body.classList.toggle('picking', picked.length > 0);
+    $('bar').style.display = picked.length ? 'flex' : 'none';
+    $('count').textContent = picked.length + ' selected';
+    $('codes').textContent = picked.join(', ');
+  }
+  $('copy').onclick = function () { copy(picked.join(', ')); };
+  $('clear').onclick = function () {
+    picked = []; document.querySelectorAll('.card.sel').forEach(function (c) { c.classList.remove('sel'); });
+    $('bar').style.display = 'none'; document.body.classList.remove('picking');
+  };
+  function copy(text) {
+    (navigator.clipboard ? navigator.clipboard.writeText(text) : Promise.reject()).then(function () { toast('Copied ' + text); },
+      function () { prompt('Copy', text); });
+  }
+  function toast(t) { var e = $('toast'); e.textContent = t; e.style.display = 'block'; clearTimeout(toast.t); toast.t = setTimeout(function () { e.style.display = 'none'; }, 1800); }
+
+  function open(it) {
+    var big = $('big'); big.removeAttribute('src'); blob(it.sha, it.path).then(function (u) { big.src = u; });
+    var info = $('info'); info.innerHTML = '';
+    var h = el('div', 'head'); h.appendChild(el('span', 'code', it.code));
+    if (it.status === 'live' || it.status === 'final') h.appendChild(el('span', 'badge ' + it.status, it.status));
+    var x = el('button', 'x', '×'); x.onclick = close; h.appendChild(x); info.appendChild(h);
+    var p = data.projects.filter(function (p) { return p.id === it.project; })[0];
+    function row(k, v) { if (!v) return; var r = el('div', 'row', k + ' '); r.appendChild(el('b', '', v)); info.appendChild(r); }
+    row('Project', p ? p.title : 'Inspiration');
+    row('Status', it.status + (it.where ? ' on ' + it.where : ''));
+    row('Name', it.title);
+    row('Batch', it.batch ? it.batch + (it.script ? ', made by ' + it.script : '') : '');
+    if (ICONLIKE[it.kind]) {
+      var tabs = el('div', 'tabs');
+      ['light', 'dark'].forEach(function (t) {
+        var bar = el('div', 'tabbar ' + t), tab = el('div', 'tab'), i16 = el('img'), i32 = el('img', 'x2');
+        tab.appendChild(i16); tab.appendChild(el('span', '', p ? p.title : it.code)); bar.appendChild(tab); bar.appendChild(i32);
+        blob(it.sha, it.path).then(function (u) { i16.src = u; i32.src = u; }); tabs.appendChild(bar);
+      });
+      info.appendChild(tabs);
+    }
+    if (it.files.length > 1 || !ICONLIKE[it.kind]) {
+      var fl = el('div', 'files'); fl.appendChild(el('div', 'row', 'Files'));
+      it.files.forEach(function (f) {
+        var a = el('a', '', f[0].split('/').pop()); a.onclick = function () {
+          blob(f[1], f[0]).then(function (u) { var t = document.createElement('a'); t.href = u; t.download = f[0].split('/').pop(); document.body.appendChild(t); t.click(); t.remove(); });
+        }; fl.appendChild(a);
+      });
+      info.appendChild(fl);
+    }
+    var acts = el('div', 'acts'), cp = el('button', 'btn main', 'Copy code'), sel = el('button', 'btn', picked.indexOf(it.code) >= 0 ? 'Unselect' : 'Select');
+    cp.onclick = function () { copy(it.code); };
+    sel.onclick = function () { pick(it.code, document.querySelector('.card[data-code="' + it.code + '"]')); close(); };
+    acts.appendChild(cp); acts.appendChild(sel); info.appendChild(acts);
+    $('detail').style.display = 'flex';
+    history.replaceState(null, '', '#' + state.view + (state.status !== 'all' ? '/' + state.status : '') + '/' + it.code);
+  }
+  function close() { $('detail').style.display = 'none'; setHash(); }
+  $('detail').onclick = function (e) { if (e.target === this) close(); };
+  document.addEventListener('keydown', function (e) { if (e.key === 'Escape') close(); });
+  $('menu').onclick = function () { document.body.classList.toggle('menu'); };
+  $('find').onkeydown = function (e) {
+    if (e.key !== 'Enter') return;
+    var it = byCode[this.value.trim().toUpperCase().replace(/\s+/g, '')];
+    if (!it) return toast('No ' + this.value.trim());
+    state.view = it.project; state.status = 'all'; go(); open(it); this.value = '';
+  };
+
+  function setHash() { history.replaceState(null, '', '#' + state.view + (state.status !== 'all' ? '/' + state.status : '')); }
+  function go() { setHash(); side(); show(); }
+  function readHash() {
+    var h = decodeURIComponent(location.hash.slice(1)).split('/');
+    var views = ['live', 'final', 'inspiration'].concat(data.projects.map(function (p) { return p.id; }));
+    if (views.indexOf(h[0]) >= 0) state.view = h[0];
+    if (STATUS.some(function (s) { return s[0] === h[1]; })) state.status = h[1];
+    var code = (h[2] || h[1] || '').toUpperCase();
+    if (byCode[code]) setTimeout(function () { open(byCode[code]); }, 0);
+  }
+})();
+</script>
+</body>
+</html>
