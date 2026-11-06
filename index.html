@@ -62,20 +62,22 @@ h2 .sub { font-weight: 400; color: var(--faint); margin-left: 6px; }
 .grid.free img { width: 100%; }
 .card { break-inside: avoid; margin: 0 0 10px; background: var(--card); border: 1px solid transparent; border-radius: 10px; overflow: hidden; cursor: pointer; position: relative; display: block; width: 100%; padding: 0; text-align: left; }
 .card:hover { background: var(--hover); }
-.card.sel { border-color: #777; }
-.card .pic { padding: 11px; display: flex; align-items: center; justify-content: center; }
+.card.sel { border-color: #8a8a8a; }
+.card .pic { padding: 4px 9px 8px; display: flex; align-items: center; justify-content: center; }
 .card.icon .pic { aspect-ratio: 1; }
 .card img { max-width: 100%; display: block; }
 .card.icon img { width: 100%; height: 100%; object-fit: contain; }
 .card.big { column-span: none; }
-.card .meta { display: flex; align-items: center; gap: 6px; padding: 0 9px 8px; font-size: 12px; color: var(--muted); }
+.card .meta { display: flex; align-items: center; gap: 6px; padding: 8px 9px 0; font-size: 12px; min-height: 26px; color: var(--muted); }
 .card .code { font-weight: 500; white-space: nowrap; flex: none; }
 .card .t { color: var(--faint); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .badge { margin-left: auto; font-size: 10px; padding: 0 5px; border-radius: 999px; white-space: nowrap; }
 .badge { color: var(--tag); border: 1px solid var(--line); }
-.tick { position: absolute; top: 5px; left: 5px; width: 16px; height: 16px; border-radius: 50%; border: 1.5px solid #888; background: rgba(0,0,0,.35); display: none; }
-.card:hover .tick, .card.sel .tick, body.picking .tick { display: block; }
-@media (hover: none) { .tick { display: block; opacity: .75; } }
+.tick { position: absolute; top: 6px; right: 6px; width: 16px; height: 16px; border-radius: 50%; border: 1.5px solid #888; background: rgba(0,0,0,.35); display: none; }
+.card.sel { background: var(--hover); }
+.sizes { display: flex; align-items: flex-end; gap: 8px; padding: 0 9px 10px; }
+.sizes img { display: block; flex: none; }
+.card .sizes .s32 { width: 32px; height: 32px; } .card .sizes .s16 { width: 16px; height: 16px; }
 .card.sel .tick { background: #777; border-color: #777; }
 .card.sel .tick::after { content: ""; position: absolute; left: 4.5px; top: 1.5px; width: 4px; height: 8px; border: solid #fff; border-width: 0 2px 2px 0; transform: rotate(45deg); }
 .empty { color: var(--muted); padding: 40px 0; }
@@ -149,7 +151,7 @@ h2 .sub { font-weight: 400; color: var(--faint); margin-left: 6px; }
   </main>
 </div>
 
-<div id="bar"><span id="count"></span><span class="codes" id="codes"></span>
+<div id="bar"><span id="count"></span><span class="codes" id="codes"></span><span class="codes" style="color:var(--faint)">Space to look</span>
   <button class="btn main" id="copy">Copy codes</button><button class="btn" id="del">Delete</button><button class="btn" id="clear">Clear</button></div>
 <div id="detail"><div class="box"><div class="view"><img id="big" alt=""></div><div class="info" id="info"></div></div></div>
 <div id="toast"></div>
@@ -392,16 +394,20 @@ h2 .sub { font-weight: 400; color: var(--faint); margin-left: 6px; }
     var c = el('div', 'card' + (ICONLIKE[it.kind] ? ' icon' : '') + (picked.indexOf(it.code) >= 0 ? ' sel' : ''));
     c.dataset.code = it.code;
     var tick = el('span', 'tick'); c.appendChild(tick);
+    var m = el('div', 'meta'); c.appendChild(m);   // the code above the icon, as on the sheets
     var pic = el('div', 'pic'), img = el('img'); img.alt = it.code; pic.appendChild(img); c.appendChild(pic);
     lazy(img, it.sha, it.path);
-    var m = el('div', 'meta'); m.appendChild(el('span', 'code', it.code));
+    if (ICONLIKE[it.kind]) {     // the same file again at tab sizes, as on the sheets: no extra download
+      var sz = el('div', 'sizes'), a = el('img', 's32'), b = el('img', 's16'); sz.appendChild(a); sz.appendChild(b); c.appendChild(sz);
+      img.onload = function () { a.src = img.src; b.src = img.src; };
+    }
+    m.appendChild(el('span', 'code', it.code));
     var cross = state.view === 'live' || state.view === 'top';
     var t = cross ? (data.projects.filter(function (p) { return p.id === it.project; })[0] || {}).title : !ICONLIKE[it.kind] && it.title;
     if (t) m.appendChild(el('span', 't', t));
     if ((it.status === 'live' || it.status === 'top') && !(cross && state.view === 'live')) m.appendChild(el('span', 'badge', it.status));
-    c.appendChild(m);
-    tick.onclick = function (e) { e.stopPropagation(); pick(it.code, c); };
-    c.onclick = function (e) { if (document.body.classList.contains('picking') && (e.metaKey || e.ctrlKey || e.shiftKey)) return pick(it.code, c); open(it); };
+    c.onclick = function () { pick(it.code, c); last = it.code; };
+    c.ondblclick = function () { if (picked.indexOf(it.code) < 0) pick(it.code, c); open(it); };
     return c;
   }
 
@@ -466,23 +472,30 @@ h2 .sub { font-weight: 400; color: var(--faint); margin-left: 6px; }
       });
       info.appendChild(fl);
     }
-    var acts = el('div', 'acts'), cp = el('button', 'btn main', 'Copy code'), sel = el('button', 'btn', picked.indexOf(it.code) >= 0 ? 'Unselect' : 'Select');
+    var acts = el('div', 'acts'), cp = el('button', 'btn main', 'Copy code');
     cp.onclick = function () { copy(it.code); };
-    sel.onclick = function () { pick(it.code, document.querySelector('.card[data-code="' + it.code + '"]')); close(); };
     var del = el('button', 'btn', gone(it) ? 'Restore' : 'Delete');
     del.onclick = function () { close(); if (gone(it)) restore([it.code]); else remove([it.code]); };
-    acts.appendChild(cp); acts.appendChild(sel); acts.appendChild(del); info.appendChild(acts);
+    acts.appendChild(cp); acts.appendChild(del); info.appendChild(acts);
     if (gone(it)) info.appendChild(el('p', 'note', 'Deleted ' + new Date(trash[it.code]).toLocaleString() + '. Removed for good when Claude next works on the icons, a day after deletion at the earliest.'));
     $('detail').style.display = 'flex';
     history.replaceState(null, '', '#' + state.view + (state.status !== 'all' ? '/' + state.status : '') + '/' + it.code);
   }
   function close() { $('detail').style.display = 'none'; setHash(); }
   $('detail').onclick = function (e) { if (e.target === this) close(); };
-  var current = null;
+  var current = null, last = null;
   document.addEventListener('keydown', function (e) {
     if (e.target.tagName === 'INPUT' || e.metaKey || e.ctrlKey || e.altKey) return;
     var open_ = $('detail').style.display === 'flex';
-    if (e.key === 'Escape') return close();
+    if (e.key === 'Escape') { if (open_) return close(); if (picked.length) $('clear').onclick(); return; }
+    if (e.key === ' ') {         // a quick look, as in the Finder: Space opens the last picked icon, Space again closes
+      e.preventDefault();
+      if (open_) return close();
+      var code = picked.indexOf(last) >= 0 ? last : picked[picked.length - 1];
+      if (code && byCode[code.toUpperCase()]) open(byCode[code.toUpperCase()]);
+      return;
+    }
+    if (!open_ && (e.key === 'Delete' || e.key === 'Backspace') && picked.length) { e.preventDefault(); return $('del').onclick(); }
     if (open_ && (e.key === 'ArrowLeft' || e.key === 'ArrowRight')) {
       var cards = [].slice.call(document.querySelectorAll('#content .card')), i = cards.findIndex(function (c) { return c.dataset.code === current; });
       var next = cards[i + (e.key === 'ArrowRight' ? 1 : -1)];
