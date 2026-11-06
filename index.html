@@ -118,6 +118,13 @@ h2.pickable:hover { background: var(--hover); color: var(--text); }
 .note { color: var(--faint); font-size: 13px; margin: 10px 0 0; }
 #toast { position: fixed; top: 18px; left: 50%; transform: translateX(-50%); max-width: min(560px, calc(100% - 32px)); background: #3a3a3a; color: var(--text); padding: 8px 14px; border-radius: 10px; font-size: 14px; display: none; z-index: 60; }
 
+
+#ctx { position: fixed; z-index: 70; display: none; min-width: 210px; background: #2a2a2a; border: 1px solid #3a3a3a; border-radius: 10px; padding: 5px; box-shadow: 0 10px 30px rgba(0,0,0,.45); font-size: 13.5px; }
+#ctx button { display: flex; width: 100%; border: 0; background: none; text-align: left; padding: 6px 10px; border-radius: 6px; cursor: pointer; }
+#ctx button:hover { background: #363636; }
+#ctx button .k { margin-left: auto; color: var(--faint); padding-left: 16px; }
+#ctx hr { border: 0; border-top: 1px solid #3a3a3a; margin: 5px 4px; }
+#ctx .head { color: var(--faint); padding: 4px 10px 6px; font-size: 12px; }
 @media (max-width: 760px) {
   #side { position: fixed; inset: 0 auto 0 0; z-index: 40; transform: translateX(-100%); transition: transform .2s; box-shadow: 0 0 40px rgba(0,0,0,.5); }
   body.menu #side { transform: none; }
@@ -159,6 +166,7 @@ h2.pickable:hover { background: var(--hover); color: var(--text); }
   <button class="btn main" id="copy">Copy codes</button><button class="btn" id="del">Delete</button><button class="btn" id="clear">Clear</button></div>
 <div id="detail"><div class="box"><div class="view"><img id="big" alt=""></div><div class="info" id="info"></div></div></div>
 <div id="toast"></div>
+<div id="ctx"></div>
 
 <script>
 // The page names no repository: the repository and a read-only token are typed once (a password manager fills them as
@@ -217,7 +225,7 @@ h2.pickable:hover { background: var(--hover); color: var(--text); }
   }, { rootMargin: '600px' });
   function lazy(img, sha, path) { img.dataset.sha = sha; img.dataset.path = path; seen.observe(img); }
 
-  var data, byCode = {}, picked = [], trash = {}, order = [], state = { view: 'linked-trees', status: 'all' };
+  var data, byCode = {}, picked = [], trash = {}, order = [], marks = {}, state = { view: 'linked-trees', status: 'all' };
   var STATUS = [['all', 'All'], ['live', 'Live'], ['top', 'Top'], ['kept', 'Kept'], ['waiting', 'Waiting'], ['source', 'Sources']];
   var ICONLIKE = { set: 1, proposal: 1 };
 
@@ -273,6 +281,23 @@ h2.pickable:hover { background: var(--hover); color: var(--text); }
   }
   function refresh() { var y = $('main').scrollTop, z = $('side').scrollTop; side(); show(); $('main').scrollTop = y; $('side').scrollTop = z; }
   function gone(it) { return !!trash[it.code]; }
+  // marks.json: the user's own status for an icon (top, kept, waiting), set on the board; Claude makes the set files
+  // of a proposal marked kept or top, and moves the marks into board.json, at its next work on the icons
+  function st(it) { var m = marks[it.code]; return m && it.status !== 'live' && ICONLIKE[it.kind] ? m : it.status; }
+  function mark(codes, to) {
+    codes = codes.filter(function (c) { var it = byCode[c.toUpperCase()]; return it && ICONLIKE[it.kind] && it.status !== 'live'; });
+    if (!codes.length) return;
+    var was = {}; codes.forEach(function (c) { was[c] = marks[c]; var it = byCode[c.toUpperCase()]; if (it.status === to) delete marks[c]; else marks[c] = to; });
+    refresh();
+    writeJson('marks.json', {}, function (m) {
+      codes.forEach(function (c) { if (marks[c]) m[c] = marks[c]; else delete m[c]; });
+    }, 'Mark ' + codes.join(', ') + ' ' + to + ' (board)').then(function () {
+      toast(codes.join(', ') + ': ' + to, 'Undo', function () {
+        codes.forEach(function (c) { if (was[c]) marks[c] = was[c]; else delete marks[c]; }); refresh();
+        writeJson('marks.json', {}, function (m) { codes.forEach(function (c) { if (was[c]) m[c] = was[c]; else delete m[c]; }); }, 'Undo mark (board)').catch(failed);
+      });
+    }, function (e) { codes.forEach(function (c) { if (was[c]) marks[c] = was[c]; else delete marks[c]; }); refresh(); failed(e); });
+  }
   // the project list in the user's order (order.json, written by dragging); projects not in it keep their place at the end
   function sortProjects() {
     var at = function (p) { var i = order.indexOf(p.id); return i < 0 ? 1e6 : i; };
@@ -290,7 +315,7 @@ h2.pickable:hover { background: var(--hover); color: var(--text); }
 
   Promise.all([fetch(API + repo + '/contents/index.json', { headers: head, cache: 'no-store' }).then(function (r) {
     refused(r); if (!r.ok) throw new Error('index.json: ' + r.status); return r.json();
-  }), readTrash(), readJson('order.json', []).then(function (o) { order = o; })]).then(function (res) {
+  }), readTrash(), readJson('order.json', []).then(function (o) { order = o; }), readJson('marks.json', {}).then(function (m) { marks = m; })]).then(function (res) {
     var d = res[0];
     data = d; sortProjects(); d.items.forEach(function (it) { byCode[it.code.toUpperCase()] = it; });
     $('login').style.display = 'none'; $('app').style.display = 'flex';
@@ -311,8 +336,8 @@ h2.pickable:hover { background: var(--hover); color: var(--text); }
       s.appendChild(a);
       return a;
     }
-    nav('live', 'Live on sites', count(function (it) { return it.status === 'live'; }));
-    nav('top', 'Top', count(function (it) { return it.status === 'top' || it.status === 'live'; }));
+    nav('live', 'Live on sites', count(function (it) { return st(it) === 'live'; }));
+    nav('top', 'Top', count(function (it) { return st(it) === 'top' || st(it) === 'live'; }));
     nav('inspiration', 'Inspiration', count(function (it) { return it.project === 'inspiration'; }));
     var nDel = data.items.filter(gone).length;
     if (nDel || state.view === 'deleted') nav('deleted', 'Deleted', nDel);
@@ -342,8 +367,8 @@ h2.pickable:hover { background: var(--hover); color: var(--text); }
     if (v === 'deleted') return data.items.filter(gone);
     return data.items.filter(function (it) {
       if (gone(it)) return false;
-      if (v === 'live') return it.status === 'live';
-      if (v === 'top') return it.status === 'top' || it.status === 'live';
+      if (v === 'live') return st(it) === 'live';
+      if (v === 'top') return st(it) === 'top' || st(it) === 'live';
       return it.project === v;
     });
   }
@@ -354,12 +379,12 @@ h2.pickable:hover { background: var(--hover); color: var(--text); }
     $('title').textContent = p ? p.title + ' · ' + p.prefix : v === 'live' ? 'Live on sites' : v === 'top' ? 'Top' : v === 'deleted' ? 'Deleted' : 'Inspiration';
     var chips = $('chips'); chips.innerHTML = '';
     if (p) STATUS.forEach(function (s) {
-      var n = s[0] === 'all' ? all.length : all.filter(function (it) { return it.status === s[0]; }).length;
+      var n = s[0] === 'all' ? all.length : all.filter(function (it) { return st(it) === s[0]; }).length;
       if (!n && s[0] !== 'all') return;
       var c = el('button', 'chip' + (state.status === s[0] ? ' on' : ''), s[1]); c.appendChild(el('span', 'n', n));
       c.onclick = function () { state.status = s[0]; go(); }; chips.appendChild(c);
     });
-    var items = state.status === 'all' ? all : all.filter(function (it) { return it.status === state.status; });
+    var items = state.status === 'all' ? all : all.filter(function (it) { return st(it) === state.status; });
     var box = $('content'); box.innerHTML = ''; $('main').scrollTop = 0;
     if (!items.length) { box.appendChild(el('p', 'empty', 'Nothing here.')); return; }
     var groups = [];
@@ -373,10 +398,10 @@ h2.pickable:hover { background: var(--hover); color: var(--text); }
       group('Your earlier icons and logos', '', items.filter(function (it) { return it.group === 'own'; }));
       group('Liked', '', items.filter(function (it) { return it.group === 'liked'; }));
     } else {
-      group('Live', '', items.filter(function (it) { return it.status === 'live'; }));
-      group('Top', '', items.filter(function (it) { return it.status === 'top'; }));
-      group('Kept', 'sets', items.filter(function (it) { return it.status === 'kept'; }).sort(desc));
-      var wait = items.filter(function (it) { return it.status === 'waiting'; }), batches = {};
+      group('Live', '', items.filter(function (it) { return st(it) === 'live'; }));
+      group('Top', '', items.filter(function (it) { return st(it) === 'top'; }));
+      group('Kept', '', items.filter(function (it) { return st(it) === 'kept'; }).sort(desc));
+      var wait = items.filter(function (it) { return st(it) === 'waiting'; }), batches = {};
       wait.forEach(function (it) { (batches[it.batch] = batches[it.batch] || []).push(it); });
       Object.keys(batches).map(function (b) { return batches[b]; })
         .sort(function (a, b) { return Math.max.apply(null, b.map(num)) - Math.max.apply(null, a.map(num)); })
@@ -385,7 +410,7 @@ h2.pickable:hover { background: var(--hover); color: var(--text); }
           var lo = list[0].code, hi = list[list.length - 1].code.split('-')[1];
           group('Waiting', list.length > 1 ? lo + ' to ' + hi : lo, list);
         });
-      group('Sources', 'images traced or drawn from', items.filter(function (it) { return it.status === 'source'; }));
+      group('Sources', 'images traced or drawn from', items.filter(function (it) { return st(it) === 'source'; }));
     }
     groups.forEach(function (g) {
       var h = el('h2', 'pickable', g[0]); if (g[1]) h.appendChild(el('span', 'sub', g[1])); h.title = 'Select all of these';
@@ -417,12 +442,62 @@ h2.pickable:hover { background: var(--hover); color: var(--text); }
     var cross = state.view === 'live' || state.view === 'top';
     var t = cross ? (data.projects.filter(function (p) { return p.id === it.project; })[0] || {}).title : !ICONLIKE[it.kind] && it.title;
     if (t) m.appendChild(el('span', 't', t));
-    if ((it.status === 'live' || it.status === 'top') && !(cross && state.view === 'live')) m.appendChild(el('span', 'badge', it.status));
+    if ((st(it) === 'live' || st(it) === 'top') && !(cross && state.view === 'live')) m.appendChild(el('span', 'badge', st(it)));
     c.onclick = function () { pick(it.code, c); last = it.code; };
+    c.oncontextmenu = function (e) { menu(e, it); };
     c.ondblclick = function () { if (picked.indexOf(it.code) < 0) pick(it.code, c); open(it); };
     return c;
   }
 
+
+  // right-click menu on an icon (Shift + right-click gives the browser's own)
+  function file(it) { return blob(it.sha, it.path); }
+  function menu(e, it) {
+    if (e.shiftKey) return;
+    e.preventDefault();
+    if (picked.indexOf(it.code) < 0) { $('clear').onclick(); pick(it.code, e.currentTarget); }
+    last = it.code;
+    var codes = picked.slice(), many = codes.length > 1, box = $('ctx'); box.innerHTML = '';
+    box.appendChild(el('div', 'head', many ? codes.length + ' selected' : it.code));
+    function item(label, key, fn) { var b = el('button', '', label); if (key) b.appendChild(el('span', 'k', key)); b.onclick = function () { hide(); fn(); }; box.appendChild(b); }
+    function line() { box.appendChild(el('hr')); }
+    item(many ? 'Copy codes' : 'Copy code', 'C', function () { copy(codes.join(', ')); });
+    if (!many) {
+      item('Look', 'Space', function () { open(it); });
+      item('Open image in new tab', '', function () { file(it).then(function (u) { window.open(u, '_blank'); }); });
+      item('Save image', '', function () { file(it).then(function (u) { var a = document.createElement('a'); a.href = u; a.download = it.code + '.' + it.path.split('.').pop(); document.body.appendChild(a); a.click(); a.remove(); }); });
+      item('Copy image', '', function () { copyImage(it); });
+    }
+    var icons = codes.map(function (c) { return byCode[c.toUpperCase()]; }).filter(function (x) { return x && ICONLIKE[x.kind] && x.status !== 'live'; });
+    if (icons.length && state.view !== 'deleted') {
+      line();
+      [['top', 'Top', 'T'], ['kept', 'Kept', 'K'], ['waiting', 'Waiting', 'W']].forEach(function (m) {
+        if (icons.every(function (x) { return st(x) === m[0]; })) return;
+        if (m[0] === 'waiting' && icons.some(function (x) { return x.kind === 'set'; })) return;
+        item('Move to ' + m[1], m[2], function () { mark(codes, m[0]); });
+      });
+    }
+    line();
+    if (state.view === 'deleted') item('Restore', '', function () { restore(codes); });
+    else item('Delete', 'Del', function () { $('del').onclick(); });
+    box.style.display = 'block';
+    var w = box.offsetWidth, h = box.offsetHeight;
+    box.style.left = Math.min(e.clientX, innerWidth - w - 8) + 'px'; box.style.top = Math.min(e.clientY, innerHeight - h - 8) + 'px';
+  }
+  function hide() { $('ctx').style.display = 'none'; }
+  document.addEventListener('click', function (e) { if (!$('ctx').contains(e.target)) hide(); });
+  window.addEventListener('blur', hide); $('main').addEventListener('wheel', hide, { passive: true });
+  function copyImage(it) {   // as a 512 px PNG, which every app can paste
+    file(it).then(function (u) {
+      var img = new Image(); img.onload = function () {
+        var c = document.createElement('canvas'), z = 512, r = img.naturalWidth && img.naturalHeight ? img.naturalHeight / img.naturalWidth : 1;
+        c.width = z; c.height = Math.round(z * r); c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+        c.toBlob(function (b) {
+          navigator.clipboard.write([new ClipboardItem({ 'image/png': b })]).then(function () { toast('Copied ' + it.code); }, function () { toast('Copying images is not allowed in this browser'); });
+        }, 'image/png');
+      }; img.src = u;
+    });
+  }
   function pick(code, c) {
     var i = picked.indexOf(code);
     if (i >= 0) picked.splice(i, 1); else picked.push(code);
@@ -458,12 +533,12 @@ h2.pickable:hover { background: var(--hover); color: var(--text); }
     var big = $('big'); big.removeAttribute('src'); blob(it.sha, it.path).then(function (u) { big.src = u; });
     var info = $('info'); info.innerHTML = '';
     var h = el('div', 'head'); h.appendChild(el('span', 'code', it.code));
-    if (it.status === 'live' || it.status === 'top') h.appendChild(el('span', 'badge', it.status));
+    if (st(it) === 'live' || st(it) === 'top') h.appendChild(el('span', 'badge', st(it)));
     var x = el('button', 'x', '×'); x.onclick = close; h.appendChild(x); info.appendChild(h);
     var p = data.projects.filter(function (p) { return p.id === it.project; })[0];
     function row(k, v) { if (!v) return; var r = el('div', 'row', k + ' '); r.appendChild(el('b', '', v)); info.appendChild(r); }
     row('Project', p ? p.title : 'Inspiration');
-    row('Status', it.status + (it.where ? ' on ' + it.where : ''));
+    row('Status', st(it) + (it.where ? ' on ' + it.where : ''));
     row('Name', it.title);
     row('Batch', it.batch ? it.batch + (it.script ? ', made by ' + it.script : '') : '');
     if (ICONLIKE[it.kind]) {
@@ -498,6 +573,7 @@ h2.pickable:hover { background: var(--hover); color: var(--text); }
   var current = null, last = null;
   document.addEventListener('keydown', function (e) {
     if (e.target.tagName === 'INPUT' || e.metaKey || e.ctrlKey || e.altKey) return;
+    if (e.key === 'Escape' && $('ctx').style.display === 'block') return hide();
     var open_ = $('detail').style.display === 'flex';
     if (e.key === 'Escape') { if (open_) return close(); if (picked.length) $('clear').onclick(); return; }
     if (e.key === ' ') {         // a quick look, as in the Finder: Space opens the last picked icon, Space again closes
@@ -508,6 +584,9 @@ h2.pickable:hover { background: var(--hover); color: var(--text); }
       return;
     }
     if (!open_ && (e.key === 'Delete' || e.key === 'Backspace') && picked.length) { e.preventDefault(); return $('del').onclick(); }
+    var mk = { t: 'top', k: 'kept', w: 'waiting' }[e.key.toLowerCase()];
+    if (!open_ && mk && picked.length && state.view !== 'deleted') { e.preventDefault(); return mark(picked.slice(), mk); }
+    if (!open_ && e.key.toLowerCase() === 'c' && picked.length) { e.preventDefault(); return copy(picked.join(', ')); }
     if (open_ && (e.key === 'ArrowLeft' || e.key === 'ArrowRight')) {
       var cards = [].slice.call(document.querySelectorAll('#content .card')), i = cards.findIndex(function (c) { return c.dataset.code === current; });
       var next = cards[i + (e.key === 'ArrowRight' ? 1 : -1)];
