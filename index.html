@@ -43,18 +43,21 @@ a { color: inherit; }
 .nav.drop-below { box-shadow: inset 0 -2px 0 #777; }
 .nav .n { margin-left: auto; color: var(--faint); font-size: 13px; }
 #main { flex: 1; overflow-y: auto; min-width: 0; }
-header { position: sticky; top: 0; z-index: 5; background: rgba(28,28,28,.94); backdrop-filter: blur(8px); border-bottom: 1px solid var(--line); padding: 14px 28px 12px; }
+header { position: sticky; top: 0; z-index: 5; background: rgba(28,28,28,.94); backdrop-filter: blur(8px); border-bottom: 1px solid var(--line); padding: 12px 28px; }
 .top { display: flex; align-items: center; gap: 12px; }
 #title { font-size: 17px; font-weight: 500; margin: 0; }
 #menu { display: none; border: 0; background: none; padding: 4px 6px; cursor: pointer; font-size: 20px; }
 #find { margin-left: auto; width: 180px; padding: 7px 12px; background: var(--card); border: 1px solid var(--line); border-radius: 10px; outline: none; }
-.chips { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 10px; }
+.chips { display: flex; gap: 6px; flex-wrap: wrap; flex: 1; min-width: 0; }
+#title { display: none; }
 .chip { border: 1px solid var(--line); background: none; border-radius: 999px; padding: 4px 12px; font-size: 13px; color: var(--muted); cursor: pointer; }
 .chip.on { background: var(--hover); color: var(--text); border-color: #444; }
 .chip .n { opacity: .65; margin-left: 4px; }
 #content { padding: 8px 28px 120px; }
 h2 { font-size: 13px; font-weight: 500; color: var(--muted); margin: 22px 0 8px; }
 h2 .sub { font-weight: 400; color: var(--faint); margin-left: 6px; }
+h2.pickable { cursor: pointer; display: inline-block; border-radius: 6px; padding: 2px 6px; margin-left: -6px; }
+h2.pickable:hover { background: var(--hover); color: var(--text); }
 .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(101px, 1fr)); gap: 11px; }
 .grid .card { margin: 0; }
 .grid.free { display: block; columns: 156px; column-gap: 11px; }
@@ -84,7 +87,8 @@ h2 .sub { font-weight: 400; color: var(--faint); margin-left: 6px; }
 
 /* selection bar */
 #bar { position: fixed; left: 50%; bottom: 22px; transform: translateX(-50%); display: none; align-items: center; gap: 12px; background: #2a2a2a; border: 1px solid var(--line); border-radius: 16px; padding: 10px 12px 10px 18px; box-shadow: 0 10px 30px rgba(0,0,0,.4); z-index: 20; max-width: calc(100% - 32px); }
-#bar .codes { color: var(--muted); font-size: 13px; max-width: 360px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#bar > * { white-space: nowrap; flex: none; }
+#bar .codes { flex: 0 1 auto; min-width: 0; color: var(--muted); font-size: 13px; max-width: 360px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .btn { border: 0; border-radius: 10px; padding: 7px 14px; cursor: pointer; background: var(--hover); }
 .btn.main { background: #3a3a3a; }
 
@@ -144,8 +148,8 @@ h2 .sub { font-weight: 400; color: var(--faint); margin-left: 6px; }
   <main id="main">
     <header>
       <div class="top"><button id="menu" aria-label="Menu">&#9776;</button><h1 id="title"></h1>
+        <div class="chips" id="chips"></div>
         <input id="find" type="search" placeholder="Go to code" autocomplete="off" spellcheck="false"></div>
-      <div class="chips" id="chips"></div>
     </header>
     <div id="content"></div>
   </main>
@@ -384,8 +388,16 @@ h2 .sub { font-weight: 400; color: var(--faint); margin-left: 6px; }
       group('Sources', 'images traced or drawn from', items.filter(function (it) { return it.status === 'source'; }));
     }
     groups.forEach(function (g) {
-      var h = el('h2', '', g[0]); if (g[1]) h.appendChild(el('span', 'sub', g[1])); box.appendChild(h);
+      var h = el('h2', 'pickable', g[0]); if (g[1]) h.appendChild(el('span', 'sub', g[1])); h.title = 'Select all of these';
+      box.appendChild(el('div')).appendChild(h);
       var grid = el('div', 'grid' + (g[2].every(function (it) { return ICONLIKE[it.kind]; }) ? '' : ' free')); g[2].forEach(function (it) { grid.appendChild(card(it)); }); box.appendChild(grid);
+      h.onclick = function () {   // the whole group at once; a second click unselects it
+        var all = g[2].every(function (it) { return picked.indexOf(it.code) >= 0; });
+        g[2].forEach(function (it) {
+          if (all === (picked.indexOf(it.code) >= 0)) pick(it.code, grid.querySelector('.card[data-code="' + it.code + '"]'));
+        });
+        last = g[2][g[2].length - 1].code;
+      };
     });
   }
   function num(it) { var m = it.code.match(/(\d+)$/); return m ? +m[1] : 0; }
