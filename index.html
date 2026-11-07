@@ -306,7 +306,7 @@ section.ph .hole { height: 90px; border-radius: 10px; display: flex; align-items
     });
   }
 
-  var data, byCode = {}, picked = [], trash = {}, order = [], state = { view: 'linked-trees', status: 'all' };
+  var data, byCode = {}, picked = [], trash = {}, order = [], state = { view: null, status: 'all' };   // view: set from the address, the last one seen, or the first group (fallback)
   var STATUS = [['all', 'All'], ['live', 'Live'], ['top', 'Top'], ['kept', 'Kept'], ['waiting', 'Waiting'], ['source', 'Sources']];
   var ICONLIKE = { set: 1, proposal: 1 };
 
@@ -466,7 +466,7 @@ section.ph .hole { height: 90px; border-radius: 10px; display: flex; align-items
   function failed(e) {
     toast(e.readOnly ? 'Not saved. GitHub says: ' + e.message + '. The token needs Contents: Read and write on the data repository.' : 'Not saved: ' + e.message, 'OK', function () {});
   }
-  function refresh() { var y = $('main').scrollTop, z = $('side').scrollTop; side(); show(y); $('side').scrollTop = z; }
+  function refresh() { var y = $('main').scrollTop, z = $('side').scrollTop; fallback(); side(); show(y); $('side').scrollTop = z; }
   function gone(it) { return !!trash[it.code]; }
   function binned(it) { return gone(it) && trash[it.code] !== 'forever'; }   // what the Deleted view shows
   // Moves to Top, Kept or Waiting (right-click menu, keys T K W, dragging; user 2026-11-07): the page writes them into
@@ -643,7 +643,7 @@ section.ph .hole { height: 90px; border-radius: 10px; display: flex; align-items
   });
   load().then(function () {
     $('login').style.display = 'none'; $('app').style.display = 'flex';
-    readHash(); setHash(); side(); show(); setTimeout(prefetch, 0);
+    readHash(); fallback(); setHash(); side(); show(); setTimeout(prefetch, 0);
   }).catch(function (e) { if (e.message !== 'refused') { $('content').innerHTML = '<p class="empty">Could not load the board: ' + e.message + '</p>'; $('app').style.display = 'flex'; } });
 
   function el(tag, cls, text) { var e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; }
@@ -698,7 +698,15 @@ section.ph .hole { height: 90px; border-radius: 10px; display: flex; align-items
     });
   }
 
+  // a view that does not exist (first visit, a group deleted or renamed, an old link) falls back to the first group in
+  // the list as it is ordered now, so no group name is fixed in the code (user, 2026-11-07)
+  function fallback() {
+    var fixed = ['live', 'top', 'inspiration', 'deleted'];
+    if (fixed.indexOf(state.view) >= 0 || data.projects.some(function (p) { return p.id === state.view; })) return;
+    state.view = data.projects.length ? data.projects[0].id : 'live'; state.status = 'all'; setHash();
+  }
   function show(y) {
+    fallback();
     var v = state.view, all = inView();
     var p = data.projects.filter(function (p) { return p.id === v; })[0];
     $('title').textContent = p ? p.title + ' · ' + L(p.prefix) : v === 'live' ? 'Live on sites' : v === 'top' ? 'Top' : v === 'deleted' ? 'Deleted' : 'Inspiration';
@@ -976,7 +984,7 @@ section.ph .hole { height: 90px; border-radius: 10px; display: flex; align-items
     state.view = it.project; state.status = 'all'; go(); open(it); this.value = '';
   };
 
-  // the last group seen is kept in this browser, so the plain address opens it again (user, 2026-11-07); first visit: Linked trees
+  // the last group seen is kept in this browser, so the plain address opens it again (user, 2026-11-07); first visit: fallback()
   function setHash() {
     var h = state.view + (state.status !== 'all' ? '/' + state.status : '');
     history.replaceState(null, '', '#' + h);
