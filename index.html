@@ -869,7 +869,7 @@ section.ph .hole { height: 90px; border-radius: 10px; display: flex; align-items
     $('del').textContent = state.view === 'deleted' ? 'Restore' : 'Delete';
     $('forever').style.display = state.view === 'deleted' ? '' : 'none';
   }
-  $('copy').onclick = function () { copy(picked.join(', ')); };
+  $('copy').onclick = function () { copy(J(picked)); };
   $('del').onclick = function () {
     var codes = picked.slice(), back = state.view === 'deleted';
     $('clear').onclick();
