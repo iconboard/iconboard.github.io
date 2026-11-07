@@ -276,6 +276,8 @@ section.ph .hole { height: 90px; border-radius: 10px; display: flex; align-items
   // Cmd+Z / Ctrl+Z (user, 2026-11-07): takes back the last change on the board, step by step: delete, restore, moves to
   // Top, Kept or Waiting, the order in Top and Kept, the project list. Delete forever cannot be taken back.
   var undos = [], undoing = false;
+  function L(c) { return String(c).toLowerCase(); }   // codes are shown in lowercase (user, 2026-11-07); files keep AB-227
+  function J(cs) { return cs.map(L).join(', '); }
   function did(label, back) { if (undoing) return; undos.push([label, back]); if (undos.length > 50) undos.shift(); }
   function undo() {
     var u = undos.pop(); if (!u) return toast('Nothing to undo');
@@ -290,18 +292,18 @@ section.ph .hole { height: 90px; border-radius: 10px; display: flex; align-items
   function remove(codes, undo) {
     var at = new Date().toISOString();
     codes.forEach(function (c) { trash[c] = at; });
-    did('delete ' + codes.join(', '), function () { restore(codes); });
+    did('delete ' + J(codes), function () { restore(codes); });
     refresh();
     writeTrash(function (t) { codes.forEach(function (c) { t[c] = at; }); }, 'Delete ' + codes.join(', ') + ' (board)').then(function () {
-      if (undo !== false) toast('Deleted ' + codes.join(', '), 'Undo', function () { restore(codes); });
+      if (undo !== false) toast('Deleted ' + J(codes), 'Undo', function () { restore(codes); });
     }, function (e) { codes.forEach(function (c) { delete trash[c]; }); refresh(); failed(e); });
   }
   function restore(codes) {
     var was = {}; codes.forEach(function (c) { was[c] = trash[c]; delete trash[c]; });
-    did('restore ' + codes.join(', '), function () { remove(codes, false); });
+    did('restore ' + J(codes), function () { remove(codes, false); });
     refresh();
     writeTrash(function (t) { codes.forEach(function (c) { delete t[c]; }); }, 'Restore ' + codes.join(', ') + ' (board)').then(function () {
-      toast('Restored ' + codes.join(', '));
+      toast('Restored ' + J(codes));
     }, function (e) { codes.forEach(function (c) { trash[c] = was[c]; }); refresh(); failed(e); });
   }
   // dragging icons (user, 2026-11-07): the picked icons, or the one under the pointer, go to the group they are
@@ -335,7 +337,7 @@ section.ph .hole { height: 90px; border-radius: 10px; display: flex; align-items
     if (picked.indexOf(code) < 0) { $('clear').onclick(); pick(code, c); }
     dragCodes = picked.slice();
     e.dataTransfer.setData('application/x-board-codes', dragCodes.join(',')); e.dataTransfer.effectAllowed = 'move';
-    var g = $('ghost'); g.textContent = dragCodes.length > 1 ? dragCodes.length + ' icons' : code; e.dataTransfer.setDragImage(g, -10, -10);
+    var g = $('ghost'); g.textContent = dragCodes.length > 1 ? dragCodes.length + ' icons' : L(code); e.dataTransfer.setDragImage(g, -10, -10);
     var d = $('drops'); d.innerHTML = '';   // Deleted has no groups to drop into: Restore and Delete forever at the top
     if (state.view === 'deleted') ['restore', 'forever'].forEach(function (k) { dropOn(d.appendChild(el('div', '', ZONES[k])), k); });
     setTimeout(function () { document.body.classList.add('dragging'); if (state.view === 'deleted') d.style.display = 'flex'; var dn = document.querySelector('.nav[data-drop="delete"]'); if (dn && state.view !== 'deleted') dn.style.display = ''; }, 0);
@@ -388,7 +390,7 @@ section.ph .hole { height: 90px; border-radius: 10px; display: flex; align-items
     undos = [];   // what came before cannot be taken back across a Delete forever
     refresh();
     writeTrash(function (t) { codes.forEach(function (c) { t[c] = 'forever'; }); }, 'Delete forever ' + codes.join(', ') + ' (board)').then(function () {
-      toast('Deleted forever ' + codes.join(', '));
+      toast('Deleted forever ' + J(codes));
     }, function (e) { codes.forEach(function (c) { trash[c] = was[c]; }); refresh(); failed(e); });
   }
   function failed(e) {
@@ -408,12 +410,12 @@ section.ph .hole { height: 90px; border-radius: 10px; display: flex; align-items
       codes.forEach(function (c) { if (was[c]) marks[c] = was[c]; else delete marks[c]; }); refresh();
       writeJson('marks.json', {}, function (m) { codes.forEach(function (c) { if (was[c]) m[c] = was[c]; else delete m[c]; }); }, 'Undo mark (board)').catch(failed);
     };
-    did('move ' + codes.join(', ') + ' to ' + to, back);
+    did('move ' + J(codes) + ' to ' + to, back);
     refresh();
     writeJson('marks.json', {}, function (m) {
       codes.forEach(function (c) { if (marks[c]) m[c] = marks[c]; else delete m[c]; });
     }, 'Mark ' + codes.join(', ') + ' ' + to + ' (board)').then(function () {
-      toast(codes.join(', ') + ': ' + to, 'Undo', function () { var i = undos.map(function (u) { return u[1]; }).indexOf(back); if (i >= 0) undos.splice(i, 1); back(); });
+      toast(J(codes) + ': ' + to, 'Undo', function () { var i = undos.map(function (u) { return u[1]; }).indexOf(back); if (i >= 0) undos.splice(i, 1); back(); });
     }, function (e) { codes.forEach(function (c) { if (was[c]) marks[c] = was[c]; else delete marks[c]; }); refresh(); failed(e); });
   }
   // the project list in the user's order (order.json, written by dragging); projects not in it keep their place at the end
@@ -500,7 +502,7 @@ section.ph .hole { height: 90px; border-radius: 10px; display: flex; align-items
   function show() {
     var v = state.view, all = inView();
     var p = data.projects.filter(function (p) { return p.id === v; })[0];
-    $('title').textContent = p ? p.title + ' · ' + p.prefix : v === 'live' ? 'Live on sites' : v === 'top' ? 'Top' : v === 'deleted' ? 'Deleted' : 'Inspiration';
+    $('title').textContent = p ? p.title + ' · ' + L(p.prefix) : v === 'live' ? 'Live on sites' : v === 'top' ? 'Top' : v === 'deleted' ? 'Deleted' : 'Inspiration';
     var chips = $('chips'); chips.innerHTML = '';
     if (p) STATUS.forEach(function (s) {
       var n = s[0] === 'all' ? all.length : all.filter(function (it) { return st(it) === s[0]; }).length;
@@ -536,7 +538,7 @@ section.ph .hole { height: 90px; border-radius: 10px; display: flex; align-items
         .forEach(function (list) {
           list.sort(function (a, b) { return num(a) - num(b); });
           var lo = list[0].code, hi = list[list.length - 1].code.split('-')[1];
-          group('Waiting', list.length > 1 ? lo + ' to ' + hi : lo, list);
+          group('Waiting', list.length > 1 ? L(lo) + ' to ' + hi : L(lo), list);
         });
       if (!wait.length) group('Waiting', '', [], true);
       group('Sources', 'images traced or drawn from', items.filter(function (it) { return st(it) === 'source'; }));
@@ -572,7 +574,7 @@ section.ph .hole { height: 90px; border-radius: 10px; display: flex; align-items
       var sz = el('div', 'sizes'), a = el('img', 's32'), b = el('img', 's16'); sz.appendChild(a); sz.appendChild(b); c.appendChild(sz);
       img.onload = function () { a.src = img.src; b.src = img.src; };
     }
-    m.appendChild(el('span', 'code', it.code));
+    m.appendChild(el('span', 'code', L(it.code)));
     var cross = state.view === 'live' || state.view === 'top';
     var t = cross ? (data.projects.filter(function (p) { return p.id === it.project; })[0] || {}).title : !ICONLIKE[it.kind] && it.title;
     if (t) m.appendChild(el('span', 't', t));
@@ -595,14 +597,14 @@ section.ph .hole { height: 90px; border-radius: 10px; display: flex; align-items
     if (picked.indexOf(it.code) < 0) { $('clear').onclick(); pick(it.code, e.currentTarget); }
     last = it.code;
     var codes = picked.slice(), many = codes.length > 1, box = $('ctx'); box.innerHTML = '';
-    box.appendChild(el('div', 'head', many ? codes.length + ' selected' : it.code));
+    box.appendChild(el('div', 'head', many ? codes.length + ' selected' : L(it.code)));
     function item(label, key, fn) { var b = el('button', '', label); if (key) b.appendChild(el('span', 'k', key)); b.onclick = function () { hide(); fn(); }; box.appendChild(b); }
     function line() { box.appendChild(el('hr')); }
-    item(many ? 'Copy codes' : 'Copy code', 'C', function () { copy(codes.join(', ')); });
+    item(many ? 'Copy codes' : 'Copy code', 'C', function () { copy(J(codes)); });
     if (!many) {
       item('Look', 'Space', function () { open(it); });
       item('Open image in new tab', '', function () { file(it).then(function (u) { window.open(u, '_blank'); }); });
-      item('Save image', '', function () { file(it).then(function (u) { var a = document.createElement('a'); a.href = u; a.download = it.code + '.' + it.path.split('.').pop(); document.body.appendChild(a); a.click(); a.remove(); }); });
+      item('Save image', '', function () { file(it).then(function (u) { var a = document.createElement('a'); a.href = u; a.download = L(it.code) + '.' + it.path.split('.').pop(); document.body.appendChild(a); a.click(); a.remove(); }); });
       item('Copy image', '', function () { copyImage(it); });
     }
     var icons = codes.map(function (c) { return byCode[c.toUpperCase()]; }).filter(function (x) { return x && ICONLIKE[x.kind] && x.status !== 'live'; });
@@ -630,7 +632,7 @@ section.ph .hole { height: 90px; border-radius: 10px; display: flex; align-items
         var c = document.createElement('canvas'), z = 512, r = img.naturalWidth && img.naturalHeight ? img.naturalHeight / img.naturalWidth : 1;
         c.width = z; c.height = Math.round(z * r); c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
         c.toBlob(function (b) {
-          navigator.clipboard.write([new ClipboardItem({ 'image/png': b })]).then(function () { toast('Copied ' + it.code); }, function () { toast('Copying images is not allowed in this browser'); });
+          navigator.clipboard.write([new ClipboardItem({ 'image/png': b })]).then(function () { toast('Copied ' + L(it.code)); }, function () { toast('Copying images is not allowed in this browser'); });
         }, 'image/png');
       }; img.src = u;
     });
@@ -644,7 +646,7 @@ section.ph .hole { height: 90px; border-radius: 10px; display: flex; align-items
     $('count').textContent = picked.length + ' selected';
     $('del').textContent = state.view === 'deleted' ? 'Restore' : 'Delete';
     $('forever').style.display = state.view === 'deleted' ? '' : 'none';
-    $('codes').textContent = picked.join(', ');
+    $('codes').textContent = J(picked);
   }
   $('copy').onclick = function () { copy(picked.join(', ')); };
   $('del').onclick = function () {
@@ -671,7 +673,7 @@ section.ph .hole { height: 90px; border-radius: 10px; display: flex; align-items
     current = it.code;
     var big = $('big'); big.removeAttribute('src'); blob(it.sha, it.path).then(function (u) { big.src = u; });
     var info = $('info'); info.innerHTML = '';
-    var h = el('div', 'head'); h.appendChild(el('span', 'code', it.code));
+    var h = el('div', 'head'); h.appendChild(el('span', 'code', L(it.code)));
     if (st(it) === 'live' || st(it) === 'top') h.appendChild(el('span', 'badge', st(it)));
     var x = el('button', 'x', '×'); x.onclick = close; h.appendChild(x); info.appendChild(h);
     var p = data.projects.filter(function (p) { return p.id === it.project; })[0];
@@ -684,7 +686,7 @@ section.ph .hole { height: 90px; border-radius: 10px; display: flex; align-items
       var tabs = el('div', 'tabs');
       ['light', 'dark'].forEach(function (t) {
         var bar = el('div', 'tabbar ' + t), tab = el('div', 'tab'), i16 = el('img'), i32 = el('img', 'x2');
-        tab.appendChild(i16); tab.appendChild(el('span', '', p ? p.title : it.code)); bar.appendChild(tab); bar.appendChild(i32);
+        tab.appendChild(i16); tab.appendChild(el('span', '', p ? p.title : L(it.code))); bar.appendChild(tab); bar.appendChild(i32);
         blob(it.sha, it.path).then(function (u) { i16.src = u; i32.src = u; }); tabs.appendChild(bar);
       });
       info.appendChild(tabs);
@@ -699,7 +701,7 @@ section.ph .hole { height: 90px; border-radius: 10px; display: flex; align-items
       info.appendChild(fl);
     }
     var acts = el('div', 'acts'), cp = el('button', 'btn main', 'Copy code');
-    cp.onclick = function () { copy(it.code); };
+    cp.onclick = function () { copy(L(it.code)); };
     var del = el('button', 'btn', gone(it) ? 'Restore' : 'Delete');
     del.onclick = function () { close(); if (gone(it)) restore([it.code]); else remove([it.code]); };
     acts.appendChild(cp); acts.appendChild(del);
@@ -707,7 +709,7 @@ section.ph .hole { height: 90px; border-radius: 10px; display: flex; align-items
     info.appendChild(acts);
     if (binned(it)) info.appendChild(el('p', 'note', 'Deleted ' + new Date(trash[it.code]).toLocaleString() + '. Restorable for a day; removed for good after that when Claude next works on the icons, or now with Delete forever.'));
     $('detail').style.display = 'flex';
-    history.replaceState(null, '', '#' + state.view + (state.status !== 'all' ? '/' + state.status : '') + '/' + it.code);
+    history.replaceState(null, '', '#' + state.view + (state.status !== 'all' ? '/' + state.status : '') + '/' + L(it.code));
   }
   function close() { $('detail').style.display = 'none'; setHash(); }
   $('detail').onclick = function (e) { if (e.target === this) close(); };
