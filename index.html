@@ -476,6 +476,7 @@ section.ph .hole { height: 90px; border-radius: 10px; display: flex; align-items
     };
     did('copy ' + J(ok) + ' to ' + p.title, undoIt);
     writeJson('copies.json', [], function (q) { return q.concat(add); }, 'Copy ' + ok.join(', ') + ' to ' + pid + ' (board)').then(function () {
+      watchCopies();
       toast(J(ok) + ' copied to ' + p.title + '; its own number comes in about a minute', 'Undo', function () { var i = undos.map(function (u) { return u[1]; }).indexOf(undoIt); if (i >= 0) undos.splice(i, 1); undoIt(); });
     }, function (e) { undoIt(); failed(e); });
   }
@@ -499,11 +500,40 @@ section.ph .hole { height: 90px; border-radius: 10px; display: flex; align-items
     });
   }
 
-  Promise.all([fetch(API + repo + '/contents/index.json', { headers: head, cache: 'no-store' }).then(function (r) {
-    refused(r); if (!r.ok) throw new Error('index.json: ' + r.status); return r.json();
-  }), readTrash(), readJson('order.json', []).then(function (o) { order = o; }), readJson('marks.json', {}).then(function (m) { marks = m; }), readJson('places.json', {}).then(function (q) { places = q; }), readJson('copies.json', []).then(function (q) { copies = q; })]).then(function (res) {
-    var d = res[0];
-    data = d; sortProjects(); d.items.forEach(function (it) { byCode[it.code.toUpperCase()] = it; }); copies.forEach(ghostCopy);
+  // everything the board reads; called at the start, when the tab is shown again, and when a copy is done
+  // (user, 2026-11-07: a copy stayed "copy of lt-136" until the page was reloaded, and a tab left open showed old icons)
+  var loaded = 0;
+  function load() {
+    return Promise.all([fetch(API + repo + '/contents/index.json', { headers: head, cache: 'no-store' }).then(function (r) {
+      refused(r); if (!r.ok) throw new Error('index.json: ' + r.status); return r.json();
+    }), readTrash(), readJson('order.json', []).then(function (o) { order = o; }), readJson('marks.json', {}).then(function (m) { marks = m; }), readJson('places.json', {}).then(function (q) { places = q; }), readJson('copies.json', []).then(function (q) { copies = q; })]).then(function (res) {
+      data = res[0]; byCode = {}; sortProjects(); data.items.forEach(function (it) { byCode[it.code.toUpperCase()] = it; }); copies.forEach(ghostCopy);
+      picked = picked.filter(function (c) { return byCode[c.toUpperCase()]; });
+      loaded = Date.now(); if (copies.length) watchCopies();
+    });
+  }
+  // while copies wait for the workflow, look every 15 s; once copies.json is empty, load again and name the new codes
+  function watchCopies() {
+    if (watchCopies.t) return;
+    var tries = 0, before = {}; data.items.forEach(function (it) { before[it.code] = 1; });
+    watchCopies.t = setInterval(function () {
+      if (++tries > 40) { clearInterval(watchCopies.t); watchCopies.t = null; return; }
+      readJson('copies.json', []).then(function (q) {
+        if (q.length) return;
+        clearInterval(watchCopies.t); watchCopies.t = null;
+        load().then(function () {
+          refresh();
+          var made = data.items.filter(function (it) { return !before[it.code] && !it.copy; }).map(function (it) { return L(it.code); });
+          if (made.length) toast('Copied: ' + made.join(', '));
+        });
+      }).catch(function () {});
+    }, 15000);
+  }
+  document.addEventListener('visibilitychange', function () {
+    if (document.visibilityState !== 'visible' || !data || dragCodes || Date.now() - loaded < 60000) return;
+    load().then(refresh).catch(function () {});
+  });
+  load().then(function () {
     $('login').style.display = 'none'; $('app').style.display = 'flex';
     readHash(); side(); show(); setTimeout(prefetch, 400);
   }).catch(function (e) { if (e.message !== 'refused') { $('content').innerHTML = '<p class="empty">Could not load the board: ' + e.message + '</p>'; $('app').style.display = 'flex'; } });
@@ -644,7 +674,11 @@ section.ph .hole { height: 90px; border-radius: 10px; display: flex; align-items
       img.onload = function () { a.src = img.src; b.src = img.src; };
     }
     m.appendChild(el('span', 'code', it.copy ? 'copy of ' + L(it.copy) : L(it.code)));
-    if (it.copy) { c.classList.add('pending'); c.title = 'being copied; its own number comes in about a minute'; return c; }
+    if (it.copy) {   // no browser menu on a copy being made (user, 2026-11-07)
+      c.classList.add('pending'); c.title = 'being copied; its own number comes in about a minute';
+      c.oncontextmenu = function (e) { if (e.shiftKey) return; e.preventDefault(); toast('Being copied; its own number comes in about a minute'); };
+      return c;
+    }
     var cross = state.view === 'live' || state.view === 'top';
     var t = cross ? (data.projects.filter(function (p) { return p.id === it.project; })[0] || {}).title : !ICONLIKE[it.kind] && it.title;
     if (t) m.appendChild(el('span', 't', t));
