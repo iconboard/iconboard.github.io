@@ -746,7 +746,7 @@ section.ph .hole { height: 90px; border-radius: 10px; display: flex; align-items
   $('menu').onclick = function () { document.body.classList.toggle('menu'); };
   $('find').onkeydown = function (e) {
     if (e.key !== 'Enter') return;
-    var it = byCode[this.value.trim().toUpperCase().replace(/\s+/g, '')];
+    var c = this.value.trim().toUpperCase().replace(/\s+/g, ''), it = byCode[c] || byCode[(data.was || {})[c]];   // an old code finds the moved icon
     if (!it) return toast('No ' + this.value.trim());
     state.view = it.project; state.status = 'all'; go(); open(it); this.value = '';
   };
