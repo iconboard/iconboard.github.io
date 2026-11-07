@@ -422,8 +422,9 @@ section.ph .hole { height: 90px; border-radius: 10px; display: flex; align-items
   function sortProjects() {
     var at = function (p) { var i = order.indexOf(p.id); return i < 0 ? 1e6 : i; };
     data.projects = data.projects.map(function (p, i) { return [p, i]; })
-      .sort(function (a, b) { return at(a[0]) - at(b[0]) || a[1] - b[1]; }).map(function (x) { return x[0]; });
+      .sort(function (a, b) { return coll(a[0]) - coll(b[0]) || at(a[0]) - at(b[0]) || a[1] - b[1]; }).map(function (x) { return x[0]; });
   }
+  function coll(p) { return p.kind === 'collection' ? 1 : 0; }   // collections (pools to take from, user 2026-11-07) after the projects
   function moveProject(id, before) {    // before: the id it goes in front of, or null for the end
     var ids = data.projects.map(function (p) { return p.id; }).filter(function (x) { return x !== id; });
     var k = before ? ids.indexOf(before) : ids.length; ids.splice(k < 0 ? ids.length : k, 0, id);
@@ -465,8 +466,8 @@ section.ph .hole { height: 90px; border-radius: 10px; display: flex; align-items
     nav('inspiration', 'Inspiration', count(function (it) { return it.project === 'inspiration'; }));
     var nDel = data.items.filter(binned).length;
     var dn = nav('deleted', 'Deleted', nDel); dn.style.display = nDel || state.view === 'deleted' || dragCodes ? '' : 'none'; dropOn(dn, 'delete');
-    s.appendChild(el('div', 'label', 'Projects'));
-    data.projects.forEach(function (p) {
+    data.projects.forEach(function (p, i) {
+      if (i === 0 || coll(p) !== coll(data.projects[i - 1])) s.appendChild(el('div', 'label', coll(p) ? 'Collections' : 'Projects'));
       var a = nav(p.id, p.title, count(function (it) { return it.project === p.id; }));
       a.draggable = true; a.dataset.id = p.id;
       a.ondragstart = function (e) { e.dataTransfer.setData('text/plain', p.id); e.dataTransfer.effectAllowed = 'move'; a.classList.add('drag'); };
