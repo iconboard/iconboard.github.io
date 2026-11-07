@@ -78,6 +78,7 @@ h2.pickable:hover { background: var(--hover); color: var(--text); }
 .card { break-inside: avoid; margin: 0 0 10px; background: transparent; border: 1px solid transparent; border-radius: 10px; overflow: hidden; cursor: pointer; position: relative; display: block; width: 100%; padding: 0; text-align: left; }
 .card:hover { background: var(--hover); }
 .card.sel { border-color: var(--sel); }
+.card.pending { opacity: .55; cursor: default; }
 .card .pic { padding: 4px 9px 8px; display: flex; align-items: center; justify-content: center; }
 .card.icon .pic { aspect-ratio: 1; }
 .card img { max-width: 100%; display: block; }
@@ -270,7 +271,7 @@ section.ph .hole { height: 90px; border-radius: 10px; display: flex; align-items
     });
   }
 
-  var data, byCode = {}, picked = [], trash = {}, order = [], marks = {}, state = { view: 'linked-trees', status: 'all' };
+  var data, byCode = {}, picked = [], trash = {}, order = [], marks = {}, copies = [], state = { view: 'linked-trees', status: 'all' };
   var STATUS = [['all', 'All'], ['live', 'Live'], ['top', 'Top'], ['kept', 'Kept'], ['waiting', 'Waiting'], ['source', 'Sources']];
   var ICONLIKE = { set: 1, proposal: 1 };
 
@@ -453,6 +454,31 @@ section.ph .hole { height: 90px; border-radius: 10px; display: flex; align-items
       toast(J(codes) + ': ' + to, 'Undo', function () { var i = undos.map(function (u) { return u[1]; }).indexOf(back); if (i >= 0) undos.splice(i, 1); back(); });
     }, function (e) { codes.forEach(function (c) { if (was[c]) marks[c] = was[c]; else delete marks[c]; }); refresh(); failed(e); });
   }
+  // copies.json (user, 2026-11-07: "dragging and dropping into a group on the left so it is copied there"): an icon
+  // dropped on a project or collection in the list; the data repository's workflow copy.yml makes the copy there with
+  // that group's next number. Until then the board shows it at once, faded, as "copy of <code>".
+  function ghostCopy(c) {
+    var it = byCode[String(c.code).toUpperCase()]; if (!it) return;
+    data.items.push({ code: 'copy:' + it.code + ':' + c.to, copy: it.code, project: c.to, kind: it.kind, path: it.path, sha: it.sha,
+                      files: [], batch: 'copied', title: it.title, status: c.status === 'top' || c.status === 'live' ? 'top' : it.kind === 'set' ? 'kept' : 'waiting' });
+  }
+  function copyTo(codes, pid) {
+    var p = data.projects.filter(function (x) { return x.id === pid; })[0];
+    var ok = codes.filter(function (c) { var it = byCode[c.toUpperCase()]; return it && ICONLIKE[it.kind] && it.project !== pid; });
+    if (!ok.length) return toast('Already in ' + p.title);
+    var add = ok.map(function (c) { return { code: c, to: pid, status: st(byCode[c.toUpperCase()]) }; });
+    add.forEach(function (c) { copies.push(c); ghostCopy(c); }); refresh();
+    var undoIt = function () {
+      copies = copies.filter(function (c) { return add.indexOf(c) < 0; });
+      data.items = data.items.filter(function (it) { return !(it.copy && add.some(function (c) { return 'copy:' + c.code + ':' + c.to === it.code; })); });
+      refresh();
+      writeJson('copies.json', [], function (q) { return q.filter(function (c) { return !add.some(function (a) { return a.code === c.code && a.to === c.to; }); }); }, 'Undo copy (board)').catch(failed);
+    };
+    did('copy ' + J(ok) + ' to ' + p.title, undoIt);
+    writeJson('copies.json', [], function (q) { return q.concat(add); }, 'Copy ' + ok.join(', ') + ' to ' + pid + ' (board)').then(function () {
+      toast(J(ok) + ' copied to ' + p.title + '; its own number comes in about a minute', 'Undo', function () { var i = undos.map(function (u) { return u[1]; }).indexOf(undoIt); if (i >= 0) undos.splice(i, 1); undoIt(); });
+    }, function (e) { undoIt(); failed(e); });
+  }
   // the project list in the user's order (order.json, written by dragging); projects not in it keep their place at the end
   function sortProjects() {
     var at = function (p) { var i = order.indexOf(p.id); return i < 0 ? 1e6 : i; };
@@ -475,9 +501,9 @@ section.ph .hole { height: 90px; border-radius: 10px; display: flex; align-items
 
   Promise.all([fetch(API + repo + '/contents/index.json', { headers: head, cache: 'no-store' }).then(function (r) {
     refused(r); if (!r.ok) throw new Error('index.json: ' + r.status); return r.json();
-  }), readTrash(), readJson('order.json', []).then(function (o) { order = o; }), readJson('marks.json', {}).then(function (m) { marks = m; }), readJson('places.json', {}).then(function (q) { places = q; })]).then(function (res) {
+  }), readTrash(), readJson('order.json', []).then(function (o) { order = o; }), readJson('marks.json', {}).then(function (m) { marks = m; }), readJson('places.json', {}).then(function (q) { places = q; }), readJson('copies.json', []).then(function (q) { copies = q; })]).then(function (res) {
     var d = res[0];
-    data = d; sortProjects(); d.items.forEach(function (it) { byCode[it.code.toUpperCase()] = it; });
+    data = d; sortProjects(); d.items.forEach(function (it) { byCode[it.code.toUpperCase()] = it; }); copies.forEach(ghostCopy);
     $('login').style.display = 'none'; $('app').style.display = 'flex';
     readHash(); side(); show(); setTimeout(prefetch, 400);
   }).catch(function (e) { if (e.message !== 'refused') { $('content').innerHTML = '<p class="empty">Could not load the board: ' + e.message + '</p>'; $('app').style.display = 'flex'; } });
@@ -507,13 +533,13 @@ section.ph .hole { height: 90px; border-radius: 10px; display: flex; align-items
       a.ondragstart = function (e) { e.dataTransfer.setData('text/plain', p.id); e.dataTransfer.effectAllowed = 'move'; a.classList.add('drag'); };
       a.ondragend = function () { a.classList.remove('drag'); };
       a.ondragover = function (e) {
-        if (dragCodes) return;
+        if (dragCodes) { if (state.view === 'deleted') return; e.preventDefault(); a.classList.add('hl'); return; }
         e.preventDefault(); var r = a.getBoundingClientRect(), low = e.clientY > r.top + r.height / 2;
         a.classList.toggle('drop-above', !low); a.classList.toggle('drop-below', low);
       };
-      a.ondragleave = function () { a.classList.remove('drop-above', 'drop-below'); };
+      a.ondragleave = function (e) { a.classList.remove('drop-above', 'drop-below'); if (!a.contains(e.relatedTarget)) a.classList.remove('hl'); };
       a.ondrop = function (e) {
-        if (dragCodes) return;
+        if (dragCodes) { e.preventDefault(); var codes = dragCodes; dragEnd(); $('clear').onclick(); return copyTo(codes, p.id); }
         e.preventDefault(); var id = e.dataTransfer.getData('text/plain'), low = a.classList.contains('drop-below');
         a.classList.remove('drop-above', 'drop-below');
         if (!id || id === p.id) return;
@@ -617,7 +643,8 @@ section.ph .hole { height: 90px; border-radius: 10px; display: flex; align-items
       var sz = el('div', 'sizes'), a = el('img', 's32'), b = el('img', 's16'); sz.appendChild(a); sz.appendChild(b); c.appendChild(sz);
       img.onload = function () { a.src = img.src; b.src = img.src; };
     }
-    m.appendChild(el('span', 'code', L(it.code)));
+    m.appendChild(el('span', 'code', it.copy ? 'copy of ' + L(it.copy) : L(it.code)));
+    if (it.copy) { c.classList.add('pending'); c.title = 'being copied; its own number comes in about a minute'; return c; }
     var cross = state.view === 'live' || state.view === 'top';
     var t = cross ? (data.projects.filter(function (p) { return p.id === it.project; })[0] || {}).title : !ICONLIKE[it.kind] && it.title;
     if (t) m.appendChild(el('span', 't', t));
