@@ -97,7 +97,7 @@ h2.pickable:hover { background: var(--hover); color: var(--text); }
 .card.sel .tick { background: #777; border-color: #777; }
 .card.sel .tick::after { content: ""; position: absolute; left: 4.5px; top: 1.5px; width: 4px; height: 8px; border: solid #fff; border-width: 0 2px 2px 0; transform: rotate(45deg); }
 .empty { color: var(--muted); padding: 40px 0; }
-/* dragging icons: drop on a zone of the strip, a group heading (Top, Kept, Waiting) or Top / Deleted in the list */
+/* dragging icons: drop on a zone of the strip, a group heading (Top, Keep, Waiting) or Top / Deleted in the list */
 #drops { position: fixed; top: 14px; left: 50%; transform: translateX(-50%); display: none; gap: 8px; z-index: 40; background: var(--pop); border: 1px solid var(--line); border-radius: 14px; padding: 8px; box-shadow: 0 10px 30px rgba(0,0,0,.4); }
 #drops div { padding: 10px 18px; border: 1px dashed #555; border-radius: 10px; color: var(--muted); font-size: 13.5px; }
 #drops div.hl, .nav.hl { background: var(--hl); color: var(--text); border-color: #999; }
@@ -307,7 +307,7 @@ section.ph .hole { height: 90px; border-radius: 10px; display: flex; align-items
   }
 
   var data, byCode = {}, picked = [], trash = {}, order = [], state = { view: null, status: 'all' };   // view: set from the address, the last one seen, or the first group (fallback)
-  var STATUS = [['all', 'All'], ['live', 'Live'], ['top', 'Top'], ['kept', 'Kept'], ['waiting', 'Waiting'], ['source', 'Sources']];
+  var STATUS = [['all', 'All'], ['live', 'Live'], ['top', 'Top'], ['kept', 'Keep'], ['waiting', 'Waiting'], ['source', 'Sources']];
   var ICONLIKE = { set: 1, proposal: 1 };
 
   // Deleted items: trash.json in the data repository, {code: time deleted}; the page hides them at once and can
@@ -344,7 +344,7 @@ section.ph .hole { height: 90px; border-radius: 10px; display: flex; align-items
   function readTrash() { return readJson('trash.json', {}).then(function (t) { trash = t; }); }
   function writeTrash(change, message) { return writeJson('trash.json', {}, function (t) { change(t); }, message); }
   // Cmd+Z / Ctrl+Z (user, 2026-11-07): takes back the last change on the board, step by step: delete, restore, moves to
-  // Top, Kept or Waiting, the order in Top and Kept, the project list. Delete forever cannot be taken back.
+  // Top, Keep or Waiting, the order in Top and Keep, the project list. Delete forever cannot be taken back.
   var undos = [], undoing = false;
   function L(c) { return String(c).toLowerCase(); }   // codes are shown in lowercase (user, 2026-11-07); files keep AB-227
   function J(cs) { return cs.map(L).join(', '); }
@@ -377,11 +377,11 @@ section.ph .hole { height: 90px; border-radius: 10px; display: flex; align-items
     }, function (e) { codes.forEach(function (c) { trash[c] = was[c]; }); refresh(); failed(e); });
   }
   // dragging icons (user, 2026-11-07): the picked icons, or the one under the pointer, go to the group they are
-  // dropped on (Top, Kept, Waiting, as the keys T, K, W; any Waiting batch means Waiting, in the icon's own batch),
+  // dropped on (Top, Keep, Waiting, as the keys T, K, W; any Waiting batch means Waiting, in the icon's own batch),
   // to Top or Deleted in the list; in Deleted: Restore or Delete forever at the top
   var dragCodes = null, places = {};
-  // places.json (user, 2026-11-07): the order the user set by dragging inside Top and Kept, {"<project>/top": [codes]};
-  // icons not in it come after, in the group's own order (Kept: newest number first); Waiting stays in number order inside its batch
+  // places.json (user, 2026-11-07): the order the user set by dragging inside Top and Keep, {"<project>/top": [codes]};
+  // icons not in it come after, in the group's own order (Keep: newest number first); Waiting stays in number order inside its batch
   function placed(list, key) {
     var at = places[key] || [], pos = function (it) { return at.indexOf(it.code); };
     return list.slice().sort(function (a, b) { var i = pos(a), j = pos(b); return (i < 0 && j < 0) ? 0 : i < 0 ? 1 : j < 0 ? -1 : i - j; });
@@ -402,7 +402,7 @@ section.ph .hole { height: 90px; border-radius: 10px; display: flex; align-items
     var r = ref.getBoundingClientRect();
     c.style.left = (s.card ? r.left - 7 : r.right + 5) + 'px'; c.style.top = r.top + 'px'; c.style.height = r.height + 'px'; c.style.display = 'block';
   }
-  var ZONES = { top: 'Top', kept: 'Kept', waiting: 'Waiting', 'delete': 'Delete', restore: 'Restore', forever: 'Delete forever' };
+  var ZONES = { top: 'Top', kept: 'Keep', waiting: 'Waiting', 'delete': 'Delete', restore: 'Restore', forever: 'Delete forever' };
   function dragStart(e, code, c) {
     if (picked.indexOf(code) < 0) { $('clear').onclick(); pick(code, c); }
     dragCodes = picked.slice();
@@ -432,7 +432,7 @@ section.ph .hole { height: 90px; border-radius: 10px; display: flex; align-items
       if (to === 'delete') return remove(codes);
       var ok = codes.filter(function (c) { var it = byCode[c.toUpperCase()]; return it && ICONLIKE[it.kind] && it.status !== 'live' && !(to === 'waiting' && it.kind === 'set'); });
       var moved = ok.filter(function (c) { return st(byCode[c.toUpperCase()]) !== to; }), n = undos.length;
-      setTimeout(function () { joinUndos(n, 'move ' + ok.join(', ') + ' to ' + to); }, 0);
+      setTimeout(function () { joinUndos(n, 'move ' + ok.join(', ') + ' to ' + (ZONES[to] || to)); }, 0);
       if (spot && ok.length) place(node, spot, ok);
       if (ok.length && !moved.length) { if (spot) refresh(); return; }   // only the place changed, or nothing
       ok = moved;
@@ -469,10 +469,10 @@ section.ph .hole { height: 90px; border-radius: 10px; display: flex; align-items
   function refresh() { var y = $('main').scrollTop, z = $('side').scrollTop; fallback(); side(); show(y); $('side').scrollTop = z; }
   function gone(it) { return !!trash[it.code]; }
   function binned(it) { return gone(it) && trash[it.code] !== 'forever'; }   // what the Deleted view shows
-  // Moves to Top, Kept or Waiting (right-click menu, keys T K W, dragging; user 2026-11-07): the page writes them into
+  // Moves to Top, Keep or Waiting (right-click menu, keys T K W, dragging; user 2026-11-07): the page writes them into
   // board.json and index.json itself, one commit, final at once (user: "do as you proposed"). board.json keeps per
   // project "top" (sets and proposals) and "kept" (proposals only: a set is kept unless top). A proposal stays one SVG
-  // in Top or Kept; its PNG and ICO files are made only when it goes live on a site.
+  // in Top or Keep; its PNG and ICO files are made only when it goes live on a site.
   function st(it) { return it.status; }
   function setStatus(map, message) {    // map: code -> top, kept or waiting
     return commitData(['board.json', 'index.json'], function (t) {
@@ -499,7 +499,7 @@ section.ph .hole { height: 90px; border-radius: 10px; display: flex; align-items
     codes.forEach(function (c) { var it = byCode[c.toUpperCase()]; was[it.code] = it.status; now[it.code] = to; it.status = to; });
     var put = function (m) { Object.keys(m).forEach(function (c) { byCode[c.toUpperCase()].status = m[c]; }); refresh(); };
     var back = function () { put(was); setStatus(was, 'Move ' + codes.join(', ') + ' back (board)').catch(function (e) { put(now); failed(e); }); };
-    did('move ' + J(codes) + ' to ' + to, back);
+    did('move ' + J(codes) + ' to ' + (ZONES[to] || to), back);
     refresh();
     setStatus(now, 'Move ' + codes.join(', ') + ' to ' + to + ' (board)').then(function () {
       toast(J(codes) + ': ' + to, 'Undo', function () { var i = undos.map(function (u) { return u[1]; }).indexOf(back); if (i >= 0) undos.splice(i, 1); back(); });
@@ -737,7 +737,7 @@ section.ph .hole { height: 90px; border-radius: 10px; display: flex; align-items
     } else {
       group('Live', '', items.filter(function (it) { return st(it) === 'live'; }));
       group('Top', '', placed(items.filter(function (it) { return st(it) === 'top'; }), v + '/top'), true);
-      group('Kept', '', placed(items.filter(function (it) { return st(it) === 'kept'; }).sort(desc), v + '/kept'), true);
+      group('Keep', '', placed(items.filter(function (it) { return st(it) === 'kept'; }).sort(desc), v + '/kept'), true);
       var wait = items.filter(function (it) { return st(it) === 'waiting'; }), batches = {};
       wait.forEach(function (it) { (batches[it.batch] = batches[it.batch] || []).push(it); });
       Object.keys(batches).map(function (b) { return batches[b]; })
@@ -754,9 +754,9 @@ section.ph .hole { height: 90px; border-radius: 10px; display: flex; align-items
       group('Sources', 'images traced or drawn from', items.filter(function (it) { return st(it) === 'source'; }));
     }
     groups.forEach(function (g) {
-      // in a project, the Top, Kept and Waiting groups take icons dropped anywhere on them (user, 2026-11-07);
-      // an empty Top or Kept shows only while dragging
-      var to = p && { Top: 'top', Kept: 'kept', Waiting: 'waiting' }[g[0]], sec = box.appendChild(el('section', to ? 'zone' + (g[2].length ? '' : ' ph') : ''));
+      // in a project, the Top, Keep and Waiting groups take icons dropped anywhere on them (user, 2026-11-07);
+      // an empty Top or Keep shows only while dragging
+      var to = p && { Top: 'top', Keep: 'kept', Waiting: 'waiting' }[g[0]], sec = box.appendChild(el('section', to ? 'zone' + (g[2].length ? '' : ' ph') : ''));
       if (to) dropOn(sec, to);
       var h = el('h2', 'pickable', g[0]); if (g[1]) h.appendChild(el('span', 'sub', g[1])); h.title = 'Select all of these';
       sec.appendChild(el('div')).appendChild(h);
@@ -835,7 +835,7 @@ section.ph .hole { height: 90px; border-radius: 10px; display: flex; align-items
     var icons = codes.map(function (c) { return byCode[c.toUpperCase()]; }).filter(function (x) { return x && ICONLIKE[x.kind] && x.status !== 'live'; });
     if (icons.length && state.view !== 'deleted') {
       line();
-      [['top', 'Top', 'T'], ['kept', 'Kept', 'K'], ['waiting', 'Waiting', 'W']].forEach(function (m) {
+      [['top', 'Top', 'T'], ['kept', 'Keep', 'K'], ['waiting', 'Waiting', 'W']].forEach(function (m) {
         if (icons.every(function (x) { return st(x) === m[0]; })) return;
         if (m[0] === 'waiting' && icons.some(function (x) { return x.kind === 'set'; })) return;
         item('Move to ' + m[1], m[2], function () { mark(codes, m[0]); });
