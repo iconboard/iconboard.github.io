@@ -218,12 +218,17 @@ section.ph .hole { height: 90px; border-radius: 10px; display: flex; align-items
   var head = { Authorization: 'Bearer ' + token, Accept: 'application/vnd.github.raw' };
   function refused(r) { if (r.status === 401 || r.status === 403 || r.status === 404) { signIn('The token was refused (expired or without access).'); throw new Error('refused'); } }
   var store = null; try { caches.open('board-blobs').then(function (c) { store = c; }); } catch (e) {}
-  var urls = {}, queue = [], running = 0;
-  function blob(sha, path) {          // a blob URL of the file, from the cache or the API (six at a time)
-    if (urls[sha]) return urls[sha];
+  var urls = {}, ready = {}, queue = [], running = 0;
+  function blob(sha, path, low) {     // a blob URL of the file, from the cache or the API (six at a time);
+    if (urls[sha]) return urls[sha];  // low: background loading, served after everything the page shows
     var type = TYPES[path.split('.').pop().toLowerCase()] || 'application/octet-stream';
     var key = 'https://board.local/' + sha;
-    urls[sha] = new Promise(function (ok) { queue.push(ok); pump(); }).then(function () {
+    urls[sha] = new Promise(function (ok) {
+      ok.low = low;                    // what the page shows goes ahead of the background loading
+      var k = low ? -1 : queue.findIndex(function (q) { return q.low; });
+      if (k < 0) queue.push(ok); else queue.splice(k, 0, ok);
+      pump();
+    }).then(function () {
       var cached = store ? store.match(key) : Promise.resolve(null);
       return cached.then(function (hit) {
         if (hit) return hit.blob();
@@ -232,7 +237,7 @@ section.ph .hole { height: 90px; border-radius: 10px; display: flex; align-items
           return r.blob();
         }).then(function (b) { if (store) store.put(key, new Response(b)); return b; });
       });
-    }).then(function (b) { running--; pump(); return URL.createObjectURL(b.slice(0, b.size, type)); },
+    }).then(function (b) { running--; pump(); return (ready[sha] = URL.createObjectURL(b.slice(0, b.size, type))); },
             function (e) { running--; pump(); throw e; });
     return urls[sha];
   }
@@ -244,7 +249,26 @@ section.ph .hole { height: 90px; border-radius: 10px; display: flex; align-items
       blob(img.dataset.sha, img.dataset.path).then(function (u) { img.src = u; }, function () {});
     });
   }, { rootMargin: '600px' });
-  function lazy(img, sha, path) { img.dataset.sha = sha; img.dataset.path = path; seen.observe(img); }
+  function lazy(img, sha, path) {
+    if (ready[sha]) { img.src = ready[sha]; return; }   // already loaded in the background: at once
+    img.dataset.sha = sha; img.dataset.path = path; seen.observe(img);
+  }
+  // Background loading (user, 2026-11-07): once the open group is shown, every other group is fetched and decoded
+  // quietly, the projects next to the open one first, so a click shows its icons at once. Files come from the
+  // browser's cache after the first time; only what changed is fetched again.
+  var warm = [], prefetched = false;
+  function prefetch() {
+    if (prefetched || !data) return; prefetched = true;
+    var ids = data.projects.map(function (p) { return p.id; }), at = Math.max(0, ids.indexOf(state.view));
+    var rank = function (it) { var i = ids.indexOf(it.project); return i < 0 ? 1e3 : Math.abs(i - at); };
+    data.items.slice().sort(function (a, b) { return rank(a) - rank(b); }).forEach(function (it) {
+      if (ready[it.sha]) return;
+      blob(it.sha, it.path, true).then(function (u) {
+        var im = new Image(); im.src = u; warm.push(im);
+        if (im.decode) im.decode().catch(function () {});
+      }, function () {});
+    });
+  }
 
   var data, byCode = {}, picked = [], trash = {}, order = [], marks = {}, state = { view: 'linked-trees', status: 'all' };
   var STATUS = [['all', 'All'], ['live', 'Live'], ['top', 'Top'], ['kept', 'Kept'], ['waiting', 'Waiting'], ['source', 'Sources']];
@@ -455,7 +479,7 @@ section.ph .hole { height: 90px; border-radius: 10px; display: flex; align-items
     var d = res[0];
     data = d; sortProjects(); d.items.forEach(function (it) { byCode[it.code.toUpperCase()] = it; });
     $('login').style.display = 'none'; $('app').style.display = 'flex';
-    readHash(); side(); show();
+    readHash(); side(); show(); setTimeout(prefetch, 400);
   }).catch(function (e) { if (e.message !== 'refused') { $('content').innerHTML = '<p class="empty">Could not load the board: ' + e.message + '</p>'; $('app').style.display = 'flex'; } });
 
   function el(tag, cls, text) { var e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; }
