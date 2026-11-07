@@ -108,7 +108,6 @@ section.ph .hole { height: 90px; border-radius: 10px; display: flex; align-items
 /* selection bar */
 #bar { position: fixed; left: 50%; bottom: 22px; transform: translateX(-50%); display: none; align-items: center; gap: 12px; background: var(--pop); border: 1px solid var(--line); border-radius: 16px; padding: 10px 12px 10px 18px; box-shadow: 0 10px 30px rgba(0,0,0,.4); z-index: 20; max-width: calc(100% - 32px); }
 #bar > * { white-space: nowrap; flex: none; }
-#bar .codes { flex: 0 1 auto; min-width: 0; color: var(--muted); font-size: 13px; max-width: 360px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .btn { border: 0; border-radius: 10px; padding: 7px 14px; cursor: pointer; background: var(--hover); }
 .btn.main { background: var(--pop2); }
 
@@ -183,7 +182,7 @@ section.ph .hole { height: 90px; border-radius: 10px; display: flex; align-items
   </main>
 </div>
 
-<div id="bar"><span id="count"></span><span class="codes" style="color:var(--faint)">Space to look</span>
+<div id="bar"><span id="count"></span>
   <button class="btn main" id="copy">Copy codes</button><button class="btn" id="del">Delete</button><button class="btn" id="forever" style="display:none">Delete forever</button><button class="btn" id="clear">Clear</button></div>
 <div id="detail"><div class="box"><div class="view"><img id="big" alt=""></div><div class="info" id="info"></div></div></div>
 <div id="toast"></div>
