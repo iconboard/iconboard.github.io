@@ -527,7 +527,7 @@ section.ph .hole { height: 90px; border-radius: 10px; display: flex; align-items
       group(v === 'live' ? 'Each project\u2019s icon on its site now' : 'Live and top sets', '', items);
     } else if (v === 'inspiration') {
       group('Your earlier icons and logos', '', items.filter(function (it) { return it.group === 'own'; }));
-      group('Liked', '', items.filter(function (it) { return it.group === 'liked'; }));
+      group('Sources', '', items.filter(function (it) { return it.group === 'sources'; }));
     } else {
       group('Live', '', items.filter(function (it) { return st(it) === 'live'; }));
       group('Top', '', placed(items.filter(function (it) { return st(it) === 'top'; }), v + '/top'), true);
