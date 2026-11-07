@@ -271,7 +271,7 @@ section.ph .hole { height: 90px; border-radius: 10px; display: flex; align-items
     });
   }
 
-  var data, byCode = {}, picked = [], trash = {}, order = [], marks = {}, copies = [], state = { view: 'linked-trees', status: 'all' };
+  var data, byCode = {}, picked = [], trash = {}, order = [], marks = {}, state = { view: 'linked-trees', status: 'all' };
   var STATUS = [['all', 'All'], ['live', 'Live'], ['top', 'Top'], ['kept', 'Kept'], ['waiting', 'Waiting'], ['source', 'Sources']];
   var ICONLIKE = { set: 1, proposal: 1 };
 
@@ -454,31 +454,97 @@ section.ph .hole { height: 90px; border-radius: 10px; display: flex; align-items
       toast(J(codes) + ': ' + to, 'Undo', function () { var i = undos.map(function (u) { return u[1]; }).indexOf(back); if (i >= 0) undos.splice(i, 1); back(); });
     }, function (e) { codes.forEach(function (c) { if (was[c]) marks[c] = was[c]; else delete marks[c]; }); refresh(); failed(e); });
   }
-  // copies.json (user, 2026-11-07: "dragging and dropping into a group on the left so it is copied there"): an icon
-  // dropped on a project or collection in the list; the data repository's workflow copy.yml makes the copy there with
-  // that group's next number. Until then the board shows it at once, faded, as "copy of <code>".
-  function ghostCopy(c) {
-    var it = byCode[String(c.code).toUpperCase()]; if (!it) return;
-    data.items.push({ code: 'copy:' + it.code + ':' + c.to, copy: it.code, project: c.to, kind: it.kind, path: it.path, sha: it.sha,
-                      files: [], batch: 'copied', title: it.title, status: c.status === 'top' || c.status === 'live' ? 'top' : it.kind === 'set' ? 'kept' : 'waiting' });
+  // Copy to another group (user, 2026-11-07: "dragging and dropping into a group on the left so it is copied there";
+  // then "15s seems too long"): the page makes the copy itself, one commit through the Git Data API. A copy of a set
+  // points at the same file contents under a new folder, so nothing is uploaded; board.json (Top), batches.json, the
+  // group's README and index.json change with it. The card shows its code at once, faded until the commit is in.
+  // Numbers as the data repository's scripts give them: one past every number the group has had.
+  function api(path, opt) {
+    return fetch(API + repo + path, Object.assign({ headers: jhead, cache: 'no-store' }, opt || {})).then(function (r) {
+      if (r.ok) return r.json();
+      return r.json().catch(function () { return {}; }).then(function (j) {
+        var e = new Error((j.message || 'error') + ' (' + r.status + ')'); e.status = r.status; e.readOnly = r.status === 403 || r.status === 404; throw e;
+      });
+    });
+  }
+  function rawAt(path, ref) {
+    return fetch(API + repo + '/contents/' + path + '?ref=' + ref, { headers: head, cache: 'no-store' }).then(function (r) {
+      if (r.status === 404) return null; if (!r.ok) throw new Error(path + ': ' + r.status); return r.text();
+    });
+  }
+  function numbers(pid, items, batches, readme, tr, was) {
+    var pre = data.projects.filter(function (x) { return x.id === pid; })[0].prefix, used = [0], re = new RegExp('^' + pre + '-(\\d+)$', 'i');
+    var code = function (c) { var m = String(c).match(re); if (m) used.push(+m[1]); };
+    items.forEach(function (it) { if (it.project === pid) code(it.code); });
+    Object.keys(batches || {}).forEach(function (k) { var x = k.split('/'); if (x[0] === pid && /^\d+$/.test(x[1])) used.push(+x[1]); });
+    Object.keys(tr || {}).forEach(code); Object.keys(was || {}).forEach(function (k) { code(k); code(was[k]); });
+    (readme || '').replace(/[Nn]ext number (\d+)/g, function (_, n) { used.push(+n - 1); });
+    return Math.max.apply(null, used) + 1;
+  }
+  function copyItem(it, pid, n, status) {      // the new index entry and the file paths it takes
+    var pre = data.projects.filter(function (x) { return x.id === pid; })[0].prefix, files, path;
+    if (it.kind === 'set') {
+      var dir = it.path.split('/').slice(0, -1).join('/'), slug = dir.split('/').pop().replace(/^\d+-?/, '') || 'copy';
+      var to = 'projects/' + pid + '/' + n + '-' + slug;
+      files = it.files.map(function (f) { return [f[0].replace(dir, to), f[1]]; }); path = it.path.replace(dir, to);
+    } else {
+      path = 'projects/' + pid + '/proposals/' + n + '.' + it.path.split('.').pop(); files = [[path, it.sha]];
+    }
+    var c = JSON.parse(JSON.stringify(it));
+    c.code = pre + '-' + n; c.project = pid; c.path = path; c.files = files;
+    c.status = it.kind === 'set' ? (status === 'top' || status === 'live' ? 'top' : 'kept') : 'waiting';
+    if (it.kind === 'proposal') c.batch = 'copied';
+    return c;
+  }
+  function commitCopies(codes, pid, tries) {   // resolves to the new items as committed
+    var ref, base, today = new Date().toISOString().slice(0, 10), readmePath = 'projects/' + pid + '/README.md';
+    return api('/git/ref/heads/main').then(function (r) { ref = r.object.sha; return api('/git/commits/' + ref); }).then(function (c) {
+      base = c.tree.sha;
+      return Promise.all(['board.json', 'batches.json', 'index.json', 'trash.json', readmePath].map(function (f) { return rawAt(f, ref); }));
+    }).then(function (t) {
+      var board = JSON.parse(t[0]), batches = JSON.parse(t[1] || '{}'), index = JSON.parse(t[2]), tr = JSON.parse(t[3] || '{}'), readme = t[4] || '';
+      var by = {}; index.items.forEach(function (x) { by[x.code.toUpperCase()] = x; });
+      var n = numbers(pid, index.items, batches, readme, tr, index.was || board.was), made = [], tree = [];
+      codes.forEach(function (code) {
+        var it = by[code.toUpperCase()]; if (!it) return;
+        var c = copyItem(it, pid, n, st(it));
+        c.files.forEach(function (f) { tree.push({ path: f[0], mode: '100644', type: 'blob', sha: f[1] }); });
+        if (c.status === 'top') (board.projects[pid].top = board.projects[pid].top || []).push(String(n));
+        if (c.kind === 'proposal') batches[pid + '/' + n] = ['copied', it.script || ''];
+        readme += '\n' + n + ': a copy of ' + L(it.code) + ' (board, ' + today + '). Next number ' + (n + 1) + '.\n';
+        index.items.push(c); made.push(c); n++;
+      });
+      if (!made.length) return [];
+      tree.push({ path: 'board.json', mode: '100644', type: 'blob', content: JSON.stringify(board, null, 2) + '\n' });
+      tree.push({ path: 'batches.json', mode: '100644', type: 'blob', content: JSON.stringify(batches, null, 1).replace(/\n +/g, '\n') });
+      tree.push({ path: 'index.json', mode: '100644', type: 'blob', content: JSON.stringify(index) });
+      tree.push({ path: readmePath, mode: '100644', type: 'blob', content: readme });
+      var msg = 'Board: copied ' + made.map(function (c, i) { return codes[i] + ' to ' + c.code; }).join(', ');
+      return api('/git/trees', { method: 'POST', body: JSON.stringify({ base_tree: base, tree: tree }) })
+        .then(function (t) { return api('/git/commits', { method: 'POST', body: JSON.stringify({ message: msg, tree: t.sha, parents: [ref] }) }); })
+        .then(function (c) { return api('/git/refs/heads/main', { method: 'PATCH', body: JSON.stringify({ sha: c.sha }) }); })
+        .then(function () { return made; });
+    }).catch(function (e) {   // someone else wrote in between: start again from the new state
+      if ((e.status === 422 || e.status === 409) && (tries || 0) < 3) return commitCopies(codes, pid, (tries || 0) + 1);
+      throw e;
+    });
   }
   function copyTo(codes, pid) {
     var p = data.projects.filter(function (x) { return x.id === pid; })[0];
     var ok = codes.filter(function (c) { var it = byCode[c.toUpperCase()]; return it && ICONLIKE[it.kind] && it.project !== pid; });
     if (!ok.length) return toast('Already in ' + p.title);
-    var add = ok.map(function (c) { return { code: c, to: pid, status: st(byCode[c.toUpperCase()]) }; });
-    add.forEach(function (c) { copies.push(c); ghostCopy(c); }); refresh();
-    var undoIt = function () {
-      copies = copies.filter(function (c) { return add.indexOf(c) < 0; });
-      data.items = data.items.filter(function (it) { return !(it.copy && add.some(function (c) { return 'copy:' + c.code + ':' + c.to === it.code; })); });
-      refresh();
-      writeJson('copies.json', [], function (q) { return q.filter(function (c) { return !add.some(function (a) { return a.code === c.code && a.to === c.to; }); }); }, 'Undo copy (board)').catch(failed);
-    };
-    did('copy ' + J(ok) + ' to ' + p.title, undoIt);
-    writeJson('copies.json', [], function (q) { return q.concat(add); }, 'Copy ' + ok.join(', ') + ' to ' + pid + ' (board)').then(function () {
-      watchCopies();
-      toast(J(ok) + ' copied to ' + p.title + '; its own number comes in about a minute', 'Undo', function () { var i = undos.map(function (u) { return u[1]; }).indexOf(undoIt); if (i >= 0) undos.splice(i, 1); undoIt(); });
-    }, function (e) { undoIt(); failed(e); });
+    // shown at once with the number the board expects; the commit confirms it (or gives the right one)
+    var n = numbers(pid, data.items, null, '', trash, data.was), shown = ok.map(function (c, i) {
+      var x = copyItem(byCode[c.toUpperCase()], pid, n + i, st(byCode[c.toUpperCase()])); x.saving = true; return x;
+    });
+    shown.forEach(function (x) { data.items.push(x); byCode[x.code.toUpperCase()] = x; }); refresh();
+    var drop = function (list) { data.items = data.items.filter(function (x) { return list.indexOf(x) < 0; }); list.forEach(function (x) { delete byCode[x.code.toUpperCase()]; }); };
+    commitCopies(ok, pid).then(function (made) {
+      drop(shown); made.forEach(function (x) { data.items.push(x); byCode[x.code.toUpperCase()] = x; }); refresh();
+      var news = made.map(function (x) { return x.code; });
+      did('copy ' + J(ok) + ' to ' + p.title, function () { remove(news); });
+      toast(J(ok) + ' copied to ' + p.title + ' as ' + J(news), 'Undo', function () { remove(news); });
+    }, function (e) { drop(shown); refresh(); failed(e); });
   }
   // the project list in the user's order (order.json, written by dragging); projects not in it keep their place at the end
   function sortProjects() {
@@ -500,34 +566,17 @@ section.ph .hole { height: 90px; border-radius: 10px; display: flex; align-items
     });
   }
 
-  // everything the board reads; called at the start, when the tab is shown again, and when a copy is done
-  // (user, 2026-11-07: a copy stayed "copy of lt-136" until the page was reloaded, and a tab left open showed old icons)
+  // everything the board reads; called at the start and when the tab is shown again after a minute
+  // (user, 2026-11-07: a tab left open showed old icons)
   var loaded = 0;
   function load() {
     return Promise.all([fetch(API + repo + '/contents/index.json', { headers: head, cache: 'no-store' }).then(function (r) {
       refused(r); if (!r.ok) throw new Error('index.json: ' + r.status); return r.json();
-    }), readTrash(), readJson('order.json', []).then(function (o) { order = o; }), readJson('marks.json', {}).then(function (m) { marks = m; }), readJson('places.json', {}).then(function (q) { places = q; }), readJson('copies.json', []).then(function (q) { copies = q; })]).then(function (res) {
-      data = res[0]; byCode = {}; sortProjects(); data.items.forEach(function (it) { byCode[it.code.toUpperCase()] = it; }); copies.forEach(ghostCopy);
+    }), readTrash(), readJson('order.json', []).then(function (o) { order = o; }), readJson('marks.json', {}).then(function (m) { marks = m; }), readJson('places.json', {}).then(function (q) { places = q; })]).then(function (res) {
+      data = res[0]; byCode = {}; sortProjects(); data.items.forEach(function (it) { byCode[it.code.toUpperCase()] = it; });
       picked = picked.filter(function (c) { return byCode[c.toUpperCase()]; });
-      loaded = Date.now(); if (copies.length) watchCopies();
+      loaded = Date.now();
     });
-  }
-  // while copies wait for the workflow, look every 15 s; once copies.json is empty, load again and name the new codes
-  function watchCopies() {
-    if (watchCopies.t) return;
-    var tries = 0, before = {}; data.items.forEach(function (it) { before[it.code] = 1; });
-    watchCopies.t = setInterval(function () {
-      if (++tries > 40) { clearInterval(watchCopies.t); watchCopies.t = null; return; }
-      readJson('copies.json', []).then(function (q) {
-        if (q.length) return;
-        clearInterval(watchCopies.t); watchCopies.t = null;
-        load().then(function () {
-          refresh();
-          var made = data.items.filter(function (it) { return !before[it.code] && !it.copy; }).map(function (it) { return L(it.code); });
-          if (made.length) toast('Copied: ' + made.join(', '));
-        });
-      }).catch(function () {});
-    }, 15000);
   }
   document.addEventListener('visibilitychange', function () {
     if (document.visibilityState !== 'visible' || !data || dragCodes || Date.now() - loaded < 60000) return;
@@ -673,10 +722,10 @@ section.ph .hole { height: 90px; border-radius: 10px; display: flex; align-items
       var sz = el('div', 'sizes'), a = el('img', 's32'), b = el('img', 's16'); sz.appendChild(a); sz.appendChild(b); c.appendChild(sz);
       img.onload = function () { a.src = img.src; b.src = img.src; };
     }
-    m.appendChild(el('span', 'code', it.copy ? 'copy of ' + L(it.copy) : L(it.code)));
-    if (it.copy) {   // no browser menu on a copy being made (user, 2026-11-07)
-      c.classList.add('pending'); c.title = 'being copied; its own number comes in about a minute';
-      c.oncontextmenu = function (e) { if (e.shiftKey) return; e.preventDefault(); toast('Being copied; its own number comes in about a minute'); };
+    m.appendChild(el('span', 'code', L(it.code)));
+    if (it.saving) {   // a copy on its way into the data repository, a second or two
+      c.classList.add('pending'); c.title = 'being copied';
+      c.oncontextmenu = function (e) { if (e.shiftKey) return; e.preventDefault(); toast('Being copied, a moment'); };
       return c;
     }
     var cross = state.view === 'live' || state.view === 'top';
