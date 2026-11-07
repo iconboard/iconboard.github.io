@@ -271,7 +271,7 @@ section.ph .hole { height: 90px; border-radius: 10px; display: flex; align-items
     });
   }
 
-  var data, byCode = {}, picked = [], trash = {}, order = [], marks = {}, state = { view: 'linked-trees', status: 'all' };
+  var data, byCode = {}, picked = [], trash = {}, order = [], state = { view: 'linked-trees', status: 'all' };
   var STATUS = [['all', 'All'], ['live', 'Live'], ['top', 'Top'], ['kept', 'Kept'], ['waiting', 'Waiting'], ['source', 'Sources']];
   var ICONLIKE = { set: 1, proposal: 1 };
 
@@ -434,25 +434,41 @@ section.ph .hole { height: 90px; border-radius: 10px; display: flex; align-items
   function refresh() { var y = $('main').scrollTop, z = $('side').scrollTop; side(); show(); $('main').scrollTop = y; $('side').scrollTop = z; }
   function gone(it) { return !!trash[it.code]; }
   function binned(it) { return gone(it) && trash[it.code] !== 'forever'; }   // what the Deleted view shows
-  // marks.json: the user's own status for an icon (top, kept, waiting), set on the board; Claude makes the set files
-  // of a proposal marked kept or top, and moves the marks into board.json, at its next work on the icons
-  function st(it) { var m = marks[it.code]; return m && it.status !== 'live' && ICONLIKE[it.kind] ? m : it.status; }
+  // Moves to Top, Kept or Waiting (right-click menu, keys T K W, dragging; user 2026-11-07): the page writes them into
+  // board.json and index.json itself, one commit, final at once (user: "do as you proposed"). board.json keeps per
+  // project "top" (sets and proposals) and "kept" (proposals only: a set is kept unless top). A proposal stays one SVG
+  // in Top or Kept; its PNG and ICO files are made only when it goes live on a site.
+  function st(it) { return it.status; }
+  function setStatus(map, message) {    // map: code -> top, kept or waiting
+    return commitData(['board.json', 'index.json'], function (t) {
+      var board = JSON.parse(t[0]), index = JSON.parse(t[1]), by = {}, n0 = 0;
+      index.items.forEach(function (x) { by[x.code] = x; });
+      Object.keys(map).forEach(function (code) {
+        var it = by[code]; if (!it || !ICONLIKE[it.kind] || it.status === 'live') return;
+        var meta = board.projects[it.project], n = code.split('-').slice(1).join('-'), to = map[code];
+        if (it.kind === 'set' && to === 'waiting') return;
+        ['top', 'kept'].forEach(function (k) { if (meta[k]) { meta[k] = meta[k].filter(function (x) { return x !== n; }); if (!meta[k].length && k === 'kept') delete meta[k]; } });
+        if (to === 'top') (meta.top = meta.top || []).push(n);
+        if (to === 'kept' && it.kind === 'proposal') (meta.kept = meta.kept || []).push(n);
+        it.status = to; n0++;
+      });
+      if (!n0) return null;
+      return { message: message, files: { 'board.json': JSON.stringify(board, null, 2) + '\n', 'index.json': JSON.stringify(index) } };
+    });
+  }
   function mark(codes, to) {
     if (picked.length) $('clear').onclick();   // a move ends the selection at once (user, 2026-11-07)
-    codes = codes.filter(function (c) { var it = byCode[c.toUpperCase()]; return it && ICONLIKE[it.kind] && it.status !== 'live'; });
+    codes = codes.filter(function (c) { var it = byCode[c.toUpperCase()]; return it && ICONLIKE[it.kind] && it.status !== 'live' && it.status !== to && !(it.kind === 'set' && to === 'waiting'); });
     if (!codes.length) return;
-    var was = {}; codes.forEach(function (c) { was[c] = marks[c]; var it = byCode[c.toUpperCase()]; if (it.status === to) delete marks[c]; else marks[c] = to; });
-    var back = function () {
-      codes.forEach(function (c) { if (was[c]) marks[c] = was[c]; else delete marks[c]; }); refresh();
-      writeJson('marks.json', {}, function (m) { codes.forEach(function (c) { if (was[c]) m[c] = was[c]; else delete m[c]; }); }, 'Undo mark (board)').catch(failed);
-    };
+    var was = {}, now = {};
+    codes.forEach(function (c) { var it = byCode[c.toUpperCase()]; was[it.code] = it.status; now[it.code] = to; it.status = to; });
+    var put = function (m) { Object.keys(m).forEach(function (c) { byCode[c.toUpperCase()].status = m[c]; }); refresh(); };
+    var back = function () { put(was); setStatus(was, 'Move ' + codes.join(', ') + ' back (board)').catch(function (e) { put(now); failed(e); }); };
     did('move ' + J(codes) + ' to ' + to, back);
     refresh();
-    writeJson('marks.json', {}, function (m) {
-      codes.forEach(function (c) { if (marks[c]) m[c] = marks[c]; else delete m[c]; });
-    }, 'Mark ' + codes.join(', ') + ' ' + to + ' (board)').then(function () {
+    setStatus(now, 'Move ' + codes.join(', ') + ' to ' + to + ' (board)').then(function () {
       toast(J(codes) + ': ' + to, 'Undo', function () { var i = undos.map(function (u) { return u[1]; }).indexOf(back); if (i >= 0) undos.splice(i, 1); back(); });
-    }, function (e) { codes.forEach(function (c) { if (was[c]) marks[c] = was[c]; else delete marks[c]; }); refresh(); failed(e); });
+    }, function (e) { put(was); failed(e); });
   }
   // Copy to another group (user, 2026-11-07: "dragging and dropping into a group on the left so it is copied there";
   // then "15s seems too long"): the page makes the copy itself, one commit through the Git Data API. A copy of a set
@@ -496,38 +512,46 @@ section.ph .hole { height: 90px; border-radius: 10px; display: flex; align-items
     if (it.kind === 'proposal') c.batch = 'copied';
     return c;
   }
-  function commitCopies(codes, pid, tries) {   // resolves to the new items as committed
-    var ref, base, today = new Date().toISOString().slice(0, 10), readmePath = 'projects/' + pid + '/README.md';
+  // one commit to the data repository: read the files at the head of main, make(texts) returns {message, files:
+  // {path: text}, links: {path: sha}, result} or null; if someone else wrote in between, start again from the new head
+  function commitData(paths, make, tries) {
+    var ref, out;
     return api('/git/ref/heads/main').then(function (r) { ref = r.object.sha; return api('/git/commits/' + ref); }).then(function (c) {
-      base = c.tree.sha;
-      return Promise.all(['board.json', 'batches.json', 'index.json', 'trash.json', readmePath].map(function (f) { return rawAt(f, ref); }));
-    }).then(function (t) {
+      var base = c.tree.sha;
+      return Promise.all(paths.map(function (f) { return rawAt(f, ref); })).then(function (t) {
+        out = make(t); if (!out) return;
+        var tree = [];
+        Object.keys(out.links || {}).forEach(function (f) { tree.push({ path: f, mode: '100644', type: 'blob', sha: out.links[f] }); });
+        Object.keys(out.files).forEach(function (f) { tree.push({ path: f, mode: '100644', type: 'blob', content: out.files[f] }); });
+        return api('/git/trees', { method: 'POST', body: JSON.stringify({ base_tree: base, tree: tree }) })
+          .then(function (t) { return api('/git/commits', { method: 'POST', body: JSON.stringify({ message: out.message, tree: t.sha, parents: [ref] }) }); })
+          .then(function (c) { return api('/git/refs/heads/main', { method: 'PATCH', body: JSON.stringify({ sha: c.sha }) }); });
+      });
+    }).then(function () { return out && out.result; }, function (e) {
+      if ((e.status === 422 || e.status === 409) && (tries || 0) < 4) return commitData(paths, make, (tries || 0) + 1);
+      throw e;
+    });
+  }
+  function commitCopies(codes, pid) {   // resolves to the new items as committed
+    var today = new Date().toISOString().slice(0, 10), readmePath = 'projects/' + pid + '/README.md';
+    return commitData(['board.json', 'batches.json', 'index.json', 'trash.json', readmePath], function (t) {
       var board = JSON.parse(t[0]), batches = JSON.parse(t[1] || '{}'), index = JSON.parse(t[2]), tr = JSON.parse(t[3] || '{}'), readme = t[4] || '';
       var by = {}; index.items.forEach(function (x) { by[x.code.toUpperCase()] = x; });
-      var n = numbers(pid, index.items, batches, readme, tr, index.was || board.was), made = [], tree = [];
+      var n = numbers(pid, index.items, batches, readme, tr, index.was || board.was), made = [], links = {};
       codes.forEach(function (code) {
         var it = by[code.toUpperCase()]; if (!it) return;
-        var c = copyItem(it, pid, n, st(it));
-        c.files.forEach(function (f) { tree.push({ path: f[0], mode: '100644', type: 'blob', sha: f[1] }); });
+        var c = copyItem(it, pid, n, it.status);
+        c.files.forEach(function (f) { links[f[0]] = f[1]; });
         if (c.status === 'top') (board.projects[pid].top = board.projects[pid].top || []).push(String(n));
         if (c.kind === 'proposal') batches[pid + '/' + n] = ['copied', it.script || ''];
         readme += '\n' + n + ': a copy of ' + L(it.code) + ' (board, ' + today + '). Next number ' + (n + 1) + '.\n';
         index.items.push(c); made.push(c); n++;
       });
-      if (!made.length) return [];
-      tree.push({ path: 'board.json', mode: '100644', type: 'blob', content: JSON.stringify(board, null, 2) + '\n' });
-      tree.push({ path: 'batches.json', mode: '100644', type: 'blob', content: JSON.stringify(batches, null, 1).replace(/\n +/g, '\n') });
-      tree.push({ path: 'index.json', mode: '100644', type: 'blob', content: JSON.stringify(index) });
-      tree.push({ path: readmePath, mode: '100644', type: 'blob', content: readme });
-      var msg = 'Board: copied ' + made.map(function (c, i) { return codes[i] + ' to ' + c.code; }).join(', ');
-      return api('/git/trees', { method: 'POST', body: JSON.stringify({ base_tree: base, tree: tree }) })
-        .then(function (t) { return api('/git/commits', { method: 'POST', body: JSON.stringify({ message: msg, tree: t.sha, parents: [ref] }) }); })
-        .then(function (c) { return api('/git/refs/heads/main', { method: 'PATCH', body: JSON.stringify({ sha: c.sha }) }); })
-        .then(function () { return made; });
-    }).catch(function (e) {   // someone else wrote in between: start again from the new state
-      if ((e.status === 422 || e.status === 409) && (tries || 0) < 3) return commitCopies(codes, pid, (tries || 0) + 1);
-      throw e;
-    });
+      if (!made.length) return null;
+      var files = { 'board.json': JSON.stringify(board, null, 2) + '\n', 'batches.json': JSON.stringify(batches, null, 1).replace(/\n +/g, '\n'), 'index.json': JSON.stringify(index) };
+      files[readmePath] = readme;
+      return { message: 'Board: copied ' + made.map(function (c, i) { return codes[i] + ' to ' + c.code; }).join(', '), files: files, links: links, result: made };
+    }).then(function (made) { return made || []; });
   }
   function copyTo(codes, pid) {
     var p = data.projects.filter(function (x) { return x.id === pid; })[0];
@@ -572,7 +596,7 @@ section.ph .hole { height: 90px; border-radius: 10px; display: flex; align-items
   function load() {
     return Promise.all([fetch(API + repo + '/contents/index.json', { headers: head, cache: 'no-store' }).then(function (r) {
       refused(r); if (!r.ok) throw new Error('index.json: ' + r.status); return r.json();
-    }), readTrash(), readJson('order.json', []).then(function (o) { order = o; }), readJson('marks.json', {}).then(function (m) { marks = m; }), readJson('places.json', {}).then(function (q) { places = q; })]).then(function (res) {
+    }), readTrash(), readJson('order.json', []).then(function (o) { order = o; }), readJson('places.json', {}).then(function (q) { places = q; })]).then(function (res) {
       data = res[0]; byCode = {}; sortProjects(); data.items.forEach(function (it) { byCode[it.code.toUpperCase()] = it; });
       picked = picked.filter(function (c) { return byCode[c.toUpperCase()]; });
       loaded = Date.now();
