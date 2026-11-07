@@ -487,7 +487,6 @@ section.ph .hole { height: 90px; border-radius: 10px; display: flex; align-items
 
   function side() {
     var s = $('side'); s.innerHTML = '';
-    s.appendChild(el('div', 'brand', 'Logo board'));
     function nav(id, label, n, mark) {
       var a = el('button', 'nav' + (state.view === id ? ' on' : ''));
       if (mark) a.appendChild(mark);
