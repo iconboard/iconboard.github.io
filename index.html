@@ -183,7 +183,7 @@ section.ph .hole { height: 90px; border-radius: 10px; display: flex; align-items
   </main>
 </div>
 
-<div id="bar"><span id="count"></span><span class="codes" id="codes"></span><span class="codes" style="color:var(--faint)">Space to look</span>
+<div id="bar"><span id="count"></span><span class="codes" style="color:var(--faint)">Space to look</span>
   <button class="btn main" id="copy">Copy codes</button><button class="btn" id="del">Delete</button><button class="btn" id="forever" style="display:none">Delete forever</button><button class="btn" id="clear">Clear</button></div>
 <div id="detail"><div class="box"><div class="view"><img id="big" alt=""></div><div class="info" id="info"></div></div></div>
 <div id="toast"></div>
@@ -667,7 +667,6 @@ section.ph .hole { height: 90px; border-radius: 10px; display: flex; align-items
     $('count').textContent = picked.length + ' selected';
     $('del').textContent = state.view === 'deleted' ? 'Restore' : 'Delete';
     $('forever').style.display = state.view === 'deleted' ? '' : 'none';
-    $('codes').textContent = J(picked);
   }
   $('copy').onclick = function () { copy(picked.join(', ')); };
   $('del').onclick = function () {
