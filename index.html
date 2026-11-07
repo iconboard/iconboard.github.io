@@ -414,6 +414,7 @@ section.ph .hole { height: 90px; border-radius: 10px; display: flex; align-items
   // of a proposal marked kept or top, and moves the marks into board.json, at its next work on the icons
   function st(it) { var m = marks[it.code]; return m && it.status !== 'live' && ICONLIKE[it.kind] ? m : it.status; }
   function mark(codes, to) {
+    if (picked.length) $('clear').onclick();   // a move ends the selection at once (user, 2026-11-07)
     codes = codes.filter(function (c) { var it = byCode[c.toUpperCase()]; return it && ICONLIKE[it.kind] && it.status !== 'live'; });
     if (!codes.length) return;
     var was = {}; codes.forEach(function (c) { was[c] = marks[c]; var it = byCode[c.toUpperCase()]; if (it.status === to) delete marks[c]; else marks[c] = to; });
