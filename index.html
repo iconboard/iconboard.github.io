@@ -218,29 +218,43 @@ section.ph .hole { height: 90px; border-radius: 10px; display: flex; align-items
                 ico: 'image/x-icon', gif: 'image/gif', json: 'application/json' };
   var head = { Authorization: 'Bearer ' + token, Accept: 'application/vnd.github.raw' };
   function refused(r) { if (r.status === 401 || r.status === 403 || r.status === 404) { signIn('The token was refused (expired or without access).'); throw new Error('refused'); } }
-  var store = null; try { caches.open('board-blobs').then(function (c) { store = c; }); } catch (e) {}
+  // the cache is opened once, as a promise: before (2026-11-07) the first files asked for went to the API while it was
+  // still opening. A file found in the cache is served at once; only downloads wait their turn, six at a time.
+  var store = Promise.resolve(null); try { store = caches.open('board-blobs').catch(function () { return null; }); } catch (e) {}
   var urls = {}, ready = {}, queue = [], running = 0;
-  function blob(sha, path, low) {     // a blob URL of the file, from the cache or the API (six at a time);
-    if (urls[sha]) return urls[sha];  // low: background loading, served after everything the page shows
+  function blob(sha, path, low) {     // a blob URL of the file, from the cache or the API;
+    if (urls[sha]) {                  // low: background loading, downloaded after everything the page shows
+      if (!low) urgent(sha);            // wanted on screen now: out of the background queue to the front
+      return urls[sha];
+    }
     var type = TYPES[path.split('.').pop().toLowerCase()] || 'application/octet-stream';
     var key = 'https://board.local/' + sha;
-    urls[sha] = new Promise(function (ok) {
-      ok.low = low;                    // what the page shows goes ahead of the background loading
-      var k = low ? -1 : queue.findIndex(function (q) { return q.low; });
-      if (k < 0) queue.push(ok); else queue.splice(k, 0, ok);
-      pump();
-    }).then(function () {
-      var cached = store ? store.match(key) : Promise.resolve(null);
-      return cached.then(function (hit) {
+    urls[sha] = store.then(function (c) {
+      return (c ? c.match(key) : Promise.resolve(null)).then(function (hit) {
         if (hit) return hit.blob();
-        return fetch(API + repo + '/git/blobs/' + sha, { headers: head }).then(function (r) {
-          refused(r); if (!r.ok) throw new Error(path + ': ' + r.status);
-          return r.blob();
-        }).then(function (b) { if (store) store.put(key, new Response(b)); return b; });
+        return new Promise(function (ok) {
+          ok.low = low; ok.sha = sha;      // what the page shows goes ahead of the background loading
+          var k = low ? -1 : queue.findIndex(function (q) { return q.low; });
+          if (k < 0) queue.push(ok); else queue.splice(k, 0, ok);
+          pump();
+        }).then(function () {
+          return fetch(API + repo + '/git/blobs/' + sha, { headers: head }).then(function (r) {
+            refused(r); if (!r.ok) throw new Error(path + ': ' + r.status);
+            return r.blob();
+          }).then(function (b) { running--; pump(); if (c) c.put(key, new Response(b)); return b; },
+                  function (e) { running--; pump(); throw e; });
+        });
       });
-    }).then(function (b) { running--; pump(); return (ready[sha] = URL.createObjectURL(b.slice(0, b.size, type))); },
-            function (e) { running--; pump(); throw e; });
+    }).then(function (b) { return (ready[sha] = URL.createObjectURL(b.slice(0, b.size, type))); },
+            function (e) { delete urls[sha]; throw e; });
     return urls[sha];
+  }
+  function urgent(sha) {
+    var i = queue.findIndex(function (q) { return q.sha === sha && q.low; });
+    if (i < 0) return;
+    var q = queue.splice(i, 1)[0]; q.low = false;
+    var k = queue.findIndex(function (x) { return x.low; });
+    if (k < 0) queue.push(q); else queue.splice(k, 0, q);
   }
   function pump() { while (running < 6 && queue.length) { running++; queue.shift()(); } }
   var seen = new IntersectionObserver(function (es) {
@@ -250,20 +264,41 @@ section.ph .hole { height: 90px; border-radius: 10px; display: flex; align-items
       blob(img.dataset.sha, img.dataset.path).then(function (u) { img.src = u; }, function () {});
     });
   }, { rootMargin: '600px' });
+  // waits: while show() builds a view, the files of its first cards, so the view is swapped in complete
+  var waits = null;
   function lazy(img, sha, path) {
     if (ready[sha]) { img.src = ready[sha]; return; }   // already loaded in the background: at once
+    if (waits && waits.length < 80) { waits.push(blob(sha, path).then(function (u) { img.src = u; }, function () {})); return; }
     img.dataset.sha = sha; img.dataset.path = path; seen.observe(img);
+  }
+  // Silent switching (user, 2026-11-07: "i still see visually how things are loading ... it would be cool if there is
+  // no delay"): a view is built off screen and the old one stays until the new one's first images are loaded and
+  // decoded (at most 1.5 s, then it shows what it has), so a group appears whole, never icon by icon.
+  var gen = 0;
+  function swap(box, y, w) {
+    var my = ++gen;
+    var done = function () {
+      if (my !== gen) return;          // a later click won
+      var old = $('content'); old.parentNode.replaceChild(box, old);
+      $('main').scrollTop = y || 0;
+    };
+    var imgs = [].slice.call(box.querySelectorAll('img')).slice(0, 240);
+    var decoded = Promise.all(w || []);
+    Promise.race([
+      decoded.then(function () { return Promise.all(imgs.map(function (i) { return i.src && i.decode ? i.decode().catch(function () {}) : null; })); }),
+      new Promise(function (r) { setTimeout(r, 1500); })
+    ]).then(done);
   }
   // Background loading (user, 2026-11-07): once the open group is shown, every other group is fetched and decoded
   // quietly, the projects next to the open one first, so a click shows its icons at once. Files come from the
   // browser's cache after the first time; only what changed is fetched again.
-  var warm = [], prefetched = false;
-  function prefetch() {
-    if (prefetched || !data) return; prefetched = true;
+  var warm = [];
+  function prefetch() {             // again after every load, for what came new (the Colours group did not before)
+    if (!data) return;
     var ids = data.projects.map(function (p) { return p.id; }), at = Math.max(0, ids.indexOf(state.view));
     var rank = function (it) { var i = ids.indexOf(it.project); return i < 0 ? 1e3 : Math.abs(i - at); };
     data.items.slice().sort(function (a, b) { return rank(a) - rank(b); }).forEach(function (it) {
-      if (ready[it.sha]) return;
+      if (urls[it.sha]) return;
       blob(it.sha, it.path, true).then(function (u) {
         var im = new Image(); im.src = u; warm.push(im);
         if (im.decode) im.decode().catch(function () {});
@@ -431,7 +466,7 @@ section.ph .hole { height: 90px; border-radius: 10px; display: flex; align-items
   function failed(e) {
     toast(e.readOnly ? 'Not saved. GitHub says: ' + e.message + '. The token needs Contents: Read and write on the data repository.' : 'Not saved: ' + e.message, 'OK', function () {});
   }
-  function refresh() { var y = $('main').scrollTop, z = $('side').scrollTop; side(); show(); $('main').scrollTop = y; $('side').scrollTop = z; }
+  function refresh() { var y = $('main').scrollTop, z = $('side').scrollTop; side(); show(y); $('side').scrollTop = z; }
   function gone(it) { return !!trash[it.code]; }
   function binned(it) { return gone(it) && trash[it.code] !== 'forever'; }   // what the Deleted view shows
   // Moves to Top, Kept or Waiting (right-click menu, keys T K W, dragging; user 2026-11-07): the page writes them into
@@ -604,11 +639,11 @@ section.ph .hole { height: 90px; border-radius: 10px; display: flex; align-items
   }
   document.addEventListener('visibilitychange', function () {
     if (document.visibilityState !== 'visible' || !data || dragCodes || Date.now() - loaded < 60000) return;
-    load().then(refresh).catch(function () {});
+    load().then(function () { refresh(); prefetch(); }).catch(function () {});
   });
   load().then(function () {
     $('login').style.display = 'none'; $('app').style.display = 'flex';
-    readHash(); side(); show(); setTimeout(prefetch, 400);
+    readHash(); side(); show(); setTimeout(prefetch, 0);
   }).catch(function (e) { if (e.message !== 'refused') { $('content').innerHTML = '<p class="empty">Could not load the board: ' + e.message + '</p>'; $('app').style.display = 'flex'; } });
 
   function el(tag, cls, text) { var e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; }
@@ -663,7 +698,7 @@ section.ph .hole { height: 90px; border-radius: 10px; display: flex; align-items
     });
   }
 
-  function show() {
+  function show(y) {
     var v = state.view, all = inView();
     var p = data.projects.filter(function (p) { return p.id === v; })[0];
     $('title').textContent = p ? p.title + ' · ' + L(p.prefix) : v === 'live' ? 'Live on sites' : v === 'top' ? 'Top' : v === 'deleted' ? 'Deleted' : 'Inspiration';
@@ -675,8 +710,8 @@ section.ph .hole { height: 90px; border-radius: 10px; display: flex; align-items
       c.onclick = function () { state.status = s[0]; go(); }; chips.appendChild(c);
     });
     var items = state.status === 'all' ? all : all.filter(function (it) { return st(it) === state.status; });
-    var box = $('content'); box.innerHTML = ''; $('main').scrollTop = 0;
-    if (!items.length) { box.appendChild(el('p', 'empty', 'Nothing here.')); return; }
+    var box = el('div'); box.id = 'content'; waits = [];
+    if (!items.length) { box.appendChild(el('p', 'empty', 'Nothing here.')); waits = null; return swap(box, 0); }
     var groups = [];
     function group(title, sub, list, keep) { if (list.length || keep) groups.push([title, sub, list]); }   // keep: an empty group to drop into
     var desc = function (a, b) { return num(b) - num(a); };
@@ -732,6 +767,7 @@ section.ph .hole { height: 90px; border-radius: 10px; display: flex; align-items
         menu(e, g[2][g[2].length - 1]);
       };
     });
+    var w = waits; waits = null; swap(box, y, w);
   }
   function num(it) { var m = it.code.match(/(\d+)$/); return m ? +m[1] : 0; }
 
@@ -744,7 +780,8 @@ section.ph .hole { height: 90px; border-radius: 10px; display: flex; align-items
     lazy(img, it.sha, it.path);
     if (ICONLIKE[it.kind]) {     // the same file again at tab sizes, as on the sheets: no extra download
       var sz = el('div', 'sizes'), a = el('img', 's32'), b = el('img', 's16'); sz.appendChild(a); sz.appendChild(b); c.appendChild(sz);
-      img.onload = function () { a.src = img.src; b.src = img.src; };
+      if (img.src) { a.src = img.src; b.src = img.src; }   // loaded already: all three decoded before the swap
+      img.onload = function () { if (a.src !== img.src) { a.src = img.src; b.src = img.src; } };
     }
     m.appendChild(el('span', 'code', L(it.code)));
     if (it.saving) {   // a copy on its way into the data repository, a second or two
