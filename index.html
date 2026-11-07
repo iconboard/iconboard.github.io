@@ -58,10 +58,11 @@ header { position: sticky; top: 0; z-index: 5; background: var(--head); backdrop
 .top { display: flex; align-items: center; gap: 12px; }
 #title { font-size: 17px; font-weight: 500; margin: 0; }
 #menu { display: none; border: 0; background: none; padding: 4px 6px; cursor: pointer; font-size: 20px; }
-#find { margin-left: auto; width: 180px; padding: 7px 12px; background: var(--card); border: 1px solid var(--line); border-radius: 10px; outline: none; }
+#find { margin-left: auto; width: 180px; height: 34px; padding: 0 12px; background: var(--card); border: 1px solid var(--line); border-radius: 8px; outline: none; }
 .chips { display: flex; gap: 6px; flex-wrap: wrap; flex: 1; min-width: 0; }
 #title { display: none; }
-.chip { border: 1px solid var(--line); background: none; border-radius: 999px; padding: 4px 12px; font-size: 13px; color: var(--muted); cursor: pointer; }
+/* rounded rectangles of one size (user, 2026-11-07), the search box the same height */
+.chip { border: 1px solid var(--line); background: none; border-radius: 8px; height: 34px; min-width: 104px; padding: 0 12px; display: inline-flex; align-items: center; justify-content: center; font-size: 13px; color: var(--muted); cursor: pointer; }
 .chip.on { background: var(--hover); color: var(--text); border-color: var(--edge); }
 .chip .n { opacity: .65; margin-left: 4px; }
 #content { padding: 8px 28px 120px; }
