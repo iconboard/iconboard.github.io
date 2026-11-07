@@ -572,6 +572,14 @@ section.ph .hole { height: 90px; border-radius: 10px; display: flex; align-items
         });
         last = g[2][g[2].length - 1].code;
       };
+      h.oncontextmenu = function (e) {   // our menu on a group name too, for the whole group (user, 2026-11-07)
+        if (e.shiftKey) return;
+        if (!g[2].every(function (it) { return picked.indexOf(it.code) >= 0; })) {
+          $('clear').onclick();
+          g[2].forEach(function (it) { pick(it.code, grid.querySelector('.card[data-code="' + it.code + '"]')); });
+        }
+        menu(e, g[2][g[2].length - 1]);
+      };
     });
   }
   function num(it) { var m = it.code.match(/(\d+)$/); return m ? +m[1] : 0; }
