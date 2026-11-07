@@ -745,7 +745,10 @@ section.ph .hole { height: 90px; border-radius: 10px; display: flex; align-items
         .forEach(function (list) {
           list.sort(function (a, b) { return num(a) - num(b); });
           var lo = list[0].code, hi = list[list.length - 1].code.split('-')[1];
-          group('Waiting', list.length > 1 ? L(lo) + ' to ' + hi : L(lo), list);
+          // a batch named in words (with a space, e.g. "ink patterns, slate") shows its name beside the range (user,
+          // 2026-11-08: ink patterns split into slate and colour); batches named like files (sheet-22) show the range alone
+          var name = / /.test(list[0].batch || '') ? ' · ' + list[0].batch : '';
+          group('Waiting', (list.length > 1 ? L(lo) + ' to ' + hi : L(lo)) + name, list);
         });
       if (!wait.length) group('Waiting', '', [], true);
       group('Sources', 'images traced or drawn from', items.filter(function (it) { return st(it) === 'source'; }));
