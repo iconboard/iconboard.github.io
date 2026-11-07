@@ -643,7 +643,7 @@ section.ph .hole { height: 90px; border-radius: 10px; display: flex; align-items
   });
   load().then(function () {
     $('login').style.display = 'none'; $('app').style.display = 'flex';
-    readHash(); side(); show(); setTimeout(prefetch, 0);
+    readHash(); setHash(); side(); show(); setTimeout(prefetch, 0);
   }).catch(function (e) { if (e.message !== 'refused') { $('content').innerHTML = '<p class="empty">Could not load the board: ' + e.message + '</p>'; $('app').style.display = 'flex'; } });
 
   function el(tag, cls, text) { var e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; }
@@ -976,10 +976,16 @@ section.ph .hole { height: 90px; border-radius: 10px; display: flex; align-items
     state.view = it.project; state.status = 'all'; go(); open(it); this.value = '';
   };
 
-  function setHash() { history.replaceState(null, '', '#' + state.view + (state.status !== 'all' ? '/' + state.status : '')); }
+  // the last group seen is kept in this browser, so the plain address opens it again (user, 2026-11-07); first visit: Linked trees
+  function setHash() {
+    var h = state.view + (state.status !== 'all' ? '/' + state.status : '');
+    history.replaceState(null, '', '#' + h);
+    try { localStorage.setItem('board-view', h); } catch (e) {}
+  }
   function go() { setHash(); side(); show(); }
   function readHash() {
-    var h = decodeURIComponent(location.hash.slice(1)).split('/');
+    var last = null; if (!location.hash.slice(1)) { try { last = localStorage.getItem('board-view'); } catch (e) {} }
+    var h = (last !== null ? last : decodeURIComponent(location.hash.slice(1))).split('/');
     var views = ['live', 'top', 'inspiration', 'deleted'].concat(data.projects.map(function (p) { return p.id; }));
     if (views.indexOf(h[0]) >= 0) state.view = h[0];
     if (STATUS.some(function (s) { return s[0] === h[1]; })) state.status = h[1];
