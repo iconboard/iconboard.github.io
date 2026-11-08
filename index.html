@@ -11,7 +11,7 @@
 <link rel="apple-touch-icon" href="apple-touch-icon.png">
 <style>
 :root {
-  /* backgrounds (user, 2026-11-08): the button top right steps through five, the bars an icon sits on in the
+  /* backgrounds (user, 2026-11-08): the button top right steps through four (Dark, Light, Chrome, Firefox; user), the bars an icon sits on in the
      browser; the others are within a shade of one of these. Values from the browsers' source (favicon-skill lessons). */
   --bg: #1c1c1c; --side: #181818; --card: #262626; --hover: #2e2e2e; --line: #303030;
   --text: #ececec; --muted: #9a9a9a; --faint: #6c6c6c;
@@ -40,12 +40,6 @@
   --text: #222; --muted: #666; --faint: #999; --tag: #777;
   --nav: #333; --on: #ebebeb; --head: rgba(255,255,255,.94); --pop: #fff; --pop2: #e8e8e8; --pophover: #f2f2f2;
   --hl: #dedede; --sel: #777; --view: #eaeaea; --edge: #bbb;
-}
-/* Chrome's light tab strip, behind the tabs not chosen */
-:root.light.strip {
-  --bg: #d3e3fd; --side: #d3e3fd; --card: #dfeafd; --hover: #c6d8f7; --line: #bccfee;
-  --on: #c2d5f5; --head: rgba(211,227,253,.94); --pop: #e6eefc; --pop2: #c2d5f5; --pophover: #d9e6fc;
-  --hl: #b5cbee; --view: #d3e3fd; --edge: #9fb6da;
 }
 * { box-sizing: border-box; }
 html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text); font: 15px/1.45 var(--font); }
@@ -201,7 +195,7 @@ section.ph .hole { height: 90px; border-radius: 10px; display: flex; align-items
       <div class="top"><button id="menu" aria-label="Menu">&#9776;</button><h1 id="title"></h1>
         <div class="chips" id="chips"></div>
         <input id="find" type="search" placeholder="Go to code" autocomplete="off" spellcheck="false">
-        <button id="theme" class="chip" style="width:140px" title="Background (L)">Dark</button></div>
+        <button id="theme" class="chip" style="width:96px" title="Background (L)">Dark</button></div>
     </header>
     <div id="content"></div>
   </main>
@@ -1099,10 +1093,9 @@ section.ph .hole { height: 90px; border-radius: 10px; display: flex; align-items
   });
   // background, kept in this browser: the button and L step to the next (user, 2026-11-08: no menu)
   var BGS = [{ id: 'dark', name: 'Dark', cls: '' },
-             { id: 'chrome-dark', name: 'Chrome dark', cls: 'chrome-dark' },
-             { id: 'firefox-dark', name: 'Firefox dark', cls: 'firefox-dark' },
              { id: 'light', name: 'Light', cls: 'light' },
-             { id: 'strip', name: 'Chrome tab strip', cls: 'light strip' }];
+             { id: 'chrome', name: 'Chrome', cls: 'chrome-dark' },
+             { id: 'firefox', name: 'Firefox', cls: 'firefox-dark' }];
   var bgAt = 0;
   function theme(id) {
     var i = id == null ? (bgAt + 1) % BGS.length : BGS.findIndex(function (b) { return b.id === id; });
