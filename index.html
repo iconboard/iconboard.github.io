@@ -886,13 +886,14 @@ section.ph .hole { height: 90px; border-radius: 10px; display: flex; align-items
         item('Move to ' + m[1], m[2], function () { mark(codes, m[0]); });
       });
     }
-    if (state.view !== 'deleted') {
+    if (state.view !== 'deleted' && state.view !== 'favourite') {
       line();
       var allFav = codes.every(function (c) { return favs.indexOf(c) >= 0; });
       item(allFav ? 'Remove from Favourite' : 'Add to Favourite', 'F', function () { fav(codes, !allFav); });
     }
     line();
     if (state.view === 'deleted') { item('Restore', '', function () { restore(codes); }); item('Delete forever', 'Del', function () { forever(codes); }); }
+    else if (state.view === 'favourite') item('Remove from Favourite', 'Del', function () { $('del').onclick(); });
     else item('Delete', 'Del', function () { $('del').onclick(); });
     box.style.display = 'block';
     var w = box.offsetWidth, h = box.offsetHeight;
@@ -919,14 +920,15 @@ section.ph .hole { height: 90px; border-radius: 10px; display: flex; align-items
     document.body.classList.toggle('picking', picked.length > 0);
     $('bar').style.display = picked.length ? 'flex' : 'none';
     $('count').textContent = picked.length + ' selected';
-    $('del').textContent = state.view === 'deleted' ? 'Restore' : 'Delete';
+    $('del').textContent = state.view === 'deleted' ? 'Restore' : state.view === 'favourite' ? 'Remove from Favourite' : 'Delete';
     $('forever').style.display = state.view === 'deleted' ? '' : 'none';
   }
   $('copy').onclick = function () { copy(J(picked)); };
   $('del').onclick = function () {
     var codes = picked.slice(), back = state.view === 'deleted';
     $('clear').onclick();
-    if (back) restore(codes.filter(function (c) { return trash[c]; })); else remove(codes);
+    // in Favourite, Delete only takes the mark off; the icon stays in its group (user, 2026-11-08)
+    if (back) restore(codes.filter(function (c) { return trash[c]; })); else if (state.view === 'favourite') fav(codes, false); else remove(codes);
   };
   $('forever').onclick = function () { var codes = picked.slice(); $('clear').onclick(); forever(codes.filter(function (c) { return trash[c]; })); };
   $('clear').onclick = function () {
@@ -976,11 +978,12 @@ section.ph .hole { height: 90px; border-radius: 10px; display: flex; align-items
     }
     var acts = el('div', 'acts'), cp = el('button', 'btn main', 'Copy code');
     cp.onclick = function () { copy(L(it.code)); };
-    var del = el('button', 'btn', gone(it) ? 'Restore' : 'Delete');
-    del.onclick = function () { close(); if (gone(it)) restore([it.code]); else remove([it.code]); };
+    var unfav = state.view === 'favourite' && !gone(it);
+    var del = el('button', 'btn', gone(it) ? 'Restore' : unfav ? 'Remove from Favourite' : 'Delete');
+    del.onclick = function () { close(); if (gone(it)) restore([it.code]); else if (unfav) fav([it.code], false); else remove([it.code]); };
     var fv0 = el('button', 'btn', isFav(it) ? '\u2605 Favourite' : '\u2606 Favourite'); fv0.title = 'F';
     fv0.onclick = function () { fav([it.code]); open(it); };
-    acts.appendChild(cp); if (!gone(it)) acts.appendChild(fv0); acts.appendChild(del);
+    acts.appendChild(cp); if (!gone(it) && !unfav) acts.appendChild(fv0); acts.appendChild(del);
     if (binned(it)) { var fv = el('button', 'btn', 'Delete forever'); fv.onclick = function () { close(); forever([it.code]); }; acts.appendChild(fv); }
     info.appendChild(acts);
     if (binned(it)) info.appendChild(el('p', 'note', 'Deleted ' + new Date(trash[it.code]).toLocaleString() + '. Restorable for a day; removed for good after that when Claude next works on the icons, or now with Delete forever.'));
