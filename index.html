@@ -370,6 +370,7 @@ section.ph .hole { height: 90px; border-radius: 10px; display: flex; align-items
     undos.push([label, function () { steps.slice().reverse().forEach(function (u) { u[1](); }); }]);
   }
   function remove(codes, undo) {
+    if (picked.length) $('clear').onclick();
     var at = new Date().toISOString();
     codes.forEach(function (c) { trash[c] = at; });
     did('delete ' + J(codes), function () { restore(codes); });
@@ -379,6 +380,7 @@ section.ph .hole { height: 90px; border-radius: 10px; display: flex; align-items
     }, function (e) { codes.forEach(function (c) { delete trash[c]; }); refresh(); failed(e); });
   }
   function restore(codes) {
+    if (picked.length) $('clear').onclick();
     var was = {}; codes.forEach(function (c) { was[c] = trash[c]; delete trash[c]; });
     did('restore ' + J(codes), function () { remove(codes, false); });
     refresh();
@@ -480,11 +482,12 @@ section.ph .hole { height: 90px; border-radius: 10px; display: flex; align-items
     writeJson('favourites.json', [], function () { return list; }, message).catch(function (e) { favs = was; refresh(); failed(e); });
   }
   function fav(codes, on) {   // on: true adds, false removes, undefined toggles (all in when any is out)
+    if (picked.length) $('clear').onclick();   // every action ends the selection, the message says what was done (user, 2026-11-08)
     if (on == null) on = codes.some(function (c) { return favs.indexOf(c) < 0; });
     var list = favs.filter(function (c) { return codes.indexOf(c) < 0; });
     if (on) list = favs.concat(codes.filter(function (c) { return favs.indexOf(c) < 0; }));
     setFavs(list, (on ? 'favourite ' : 'unfavourite ') + J(codes), (on ? 'Favourite ' : 'Unfavourite ') + codes.join(', ') + ' (board)');
-    toast((on ? 'Favourite: ' : 'No longer favourite: ') + J(codes));
+    toast((on ? 'Added to Favourite: ' : 'Removed from Favourite: ') + J(codes));
   }
   function favPlace(spot, codes) {   // a drop inside Favourite: the dropped icons in front of spot.card
     var list = spot.cards.map(function (c) { return c.dataset.code; }).filter(function (c) { return codes.indexOf(c) < 0; });
@@ -496,6 +499,7 @@ section.ph .hole { height: 90px; border-radius: 10px; display: flex; align-items
     setFavs(list, 'favourite order', 'Favourite order (board)');
   }
   function forever(codes) {   // as in Gmail's Trash: gone from the board at once, files removed by the data repository's workflow
+    if (picked.length) $('clear').onclick();
     var was = {}; codes.forEach(function (c) { was[c] = trash[c]; trash[c] = 'forever'; });
     undos = [];   // what came before cannot be taken back across a Delete forever
     refresh();
@@ -542,7 +546,7 @@ section.ph .hole { height: 90px; border-radius: 10px; display: flex; align-items
     did('move ' + J(codes) + ' to ' + (ZONES[to] || to), back);
     refresh();
     setStatus(now, 'Move ' + codes.join(', ') + ' to ' + to + ' (board)').then(function () {
-      toast(J(codes) + ': ' + to, 'Undo', function () { var i = undos.map(function (u) { return u[1]; }).indexOf(back); if (i >= 0) undos.splice(i, 1); back(); });
+      toast('Moved to ' + (ZONES[to] || to) + ': ' + J(codes), 'Undo', function () { var i = undos.map(function (u) { return u[1]; }).indexOf(back); if (i >= 0) undos.splice(i, 1); back(); });
     }, function (e) { put(was); failed(e); });
   }
   // Copy to another group (user, 2026-11-07: "dragging and dropping into a group on the left so it is copied there";
@@ -936,6 +940,7 @@ section.ph .hole { height: 90px; border-radius: 10px; display: flex; align-items
     $('bar').style.display = 'none'; document.body.classList.remove('picking');
   };
   function copy(text) {
+    if (picked.length) $('clear').onclick();
     (navigator.clipboard ? navigator.clipboard.writeText(text) : Promise.reject()).then(function () { toast('Copied ' + text); },
       function () { prompt('Copy', text); });
   }
