@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="robots" content="noindex, nofollow">
 <meta name="color-scheme" content="dark">
-<title>Logo board</title>
+<title>Icon board</title>
 <link rel="icon" href="favicon.ico" sizes="32x32">
 <link rel="icon" href="favicon.svg" type="image/svg+xml">
 <link rel="apple-touch-icon" href="apple-touch-icon.png">
@@ -162,7 +162,7 @@ section.ph .hole { height: 90px; border-radius: 10px; display: flex; align-items
 <body>
 <div id="login">
   <form method="post" action="#">
-    <h1>Logo board</h1>
+    <h1>Icon board</h1>
     <p id="why">Sign in to open the board.</p>
     <input name="username" autocomplete="username" placeholder="Repository" spellcheck="false">
     <input name="password" type="password" autocomplete="current-password" placeholder="Token">
@@ -217,7 +217,15 @@ section.ph .hole { height: 90px; border-radius: 10px; display: flex; align-items
   var TYPES = { svg: 'image/svg+xml', png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', webp: 'image/webp',
                 ico: 'image/x-icon', gif: 'image/gif', json: 'application/json' };
   var head = { Authorization: 'Bearer ' + token, Accept: 'application/vnd.github.raw' };
-  function refused(r) { if (r.status === 401 || r.status === 403 || r.status === 404) { signIn('The token was refused (expired or without access).'); throw new Error('refused'); } }
+  // On a refusal GitHub's own reason is shown, so a wrong token, a missing repository and an organisation policy differ.
+  function refused(r) {
+    if (r.status !== 401 && r.status !== 403 && r.status !== 404) return;
+    signIn('The token was refused (' + r.status + ') for ' + repo + '.');
+    r.clone().json().then(function (j) {
+      if (j && j.message) $('why').textContent = 'GitHub refused the token for ' + repo + ' (' + r.status + '): ' + j.message;
+    }).catch(function () {});
+    throw new Error('refused');
+  }
   // the cache is opened once, as a promise: before (2026-11-07) the first files asked for went to the API while it was
   // still opening. A file found in the cache is served at once; only downloads wait their turn, six at a time.
   var store = Promise.resolve(null); try { store = caches.open('board-blobs').catch(function () { return null; }); } catch (e) {}
