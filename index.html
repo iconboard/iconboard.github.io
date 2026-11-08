@@ -89,6 +89,8 @@ h2.pickable:hover { background: var(--hover); color: var(--text); }
 .card .t { color: var(--faint); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .badge { margin-left: auto; font-size: 10px; padding: 0 5px; border-radius: 999px; white-space: nowrap; }
 .badge { color: var(--tag); border: 1px solid var(--line); }
+.fav { margin-left: auto; font-size: 11px; color: #d4a017; }
+.badge + .fav { margin-left: 4px; }
 .tick { position: absolute; top: 6px; right: 6px; width: 16px; height: 16px; border-radius: 50%; border: 1.5px solid #888; background: rgba(0,0,0,.35); display: none; }
 .card.sel { background: var(--hover); }
 .sizes { display: flex; align-items: flex-end; gap: 8px; padding: 0 9px 10px; }
@@ -314,7 +316,7 @@ section.ph .hole { height: 90px; border-radius: 10px; display: flex; align-items
     });
   }
 
-  var data, byCode = {}, picked = [], trash = {}, order = [], state = { view: null, status: 'all' };   // view: set from the address, the last one seen, or the first group (fallback)
+  var data, byCode = {}, picked = [], trash = {}, order = [], favs = [], state = { view: null, status: 'all' };   // view: set from the address, the last one seen, or the first group (fallback)
   var STATUS = [['all', 'All'], ['live', 'Live'], ['top', 'Top'], ['kept', 'Keep'], ['waiting', 'Waiting'], ['source', 'Sources']];
   var ICONLIKE = { set: 1, proposal: 1 };
 
@@ -427,7 +429,7 @@ section.ph .hole { height: 90px; border-radius: 10px; display: flex; align-items
   }
   function dropOn(node, to) {
     node.dataset.drop = to;
-    var ordered = node.tagName === 'SECTION' && (to === 'top' || to === 'kept');
+    var ordered = node.tagName === 'SECTION' && (to === 'top' || to === 'kept' || to === 'favourite');
     node.addEventListener('dragover', function (e) { if (!dragCodes) return; e.preventDefault(); node.classList.add('hl'); if (ordered) caret(node, e.clientX, e.clientY); });
     node.addEventListener('dragleave', function (e) { if (!node.contains(e.relatedTarget)) { node.classList.remove('hl'); $('caret').style.display = 'none'; } });
     node.addEventListener('drop', function (e) {
@@ -438,6 +440,11 @@ section.ph .hole { height: 90px; border-radius: 10px; display: flex; align-items
       if (to === 'restore' || (del && to !== 'forever' && to !== 'delete')) return restore(codes.filter(function (c) { return trash[c]; }));
       if (to === 'forever' || (del && to === 'delete')) return forever(codes.filter(function (c) { return trash[c]; }));
       if (to === 'delete') return remove(codes);
+      if (to === 'favourite') {
+        if (spot) return favPlace(spot, codes);
+        var add = codes.filter(function (c) { return favs.indexOf(c) < 0; });
+        return add.length ? fav(add, true) : toast('Already in Favourite');
+      }
       var ok = codes.filter(function (c) { var it = byCode[c.toUpperCase()]; return it && ICONLIKE[it.kind] && it.status !== 'live' && !(to === 'waiting' && it.kind === 'set'); });
       var moved = ok.filter(function (c) { return st(byCode[c.toUpperCase()]) !== to; }), n = undos.length;
       setTimeout(function () { joinUndos(n, 'move ' + ok.join(', ') + ' to ' + (ZONES[to] || to)); }, 0);
@@ -462,6 +469,31 @@ section.ph .hole { height: 90px; border-radius: 10px; display: flex; align-items
     writeJson('places.json', {}, function (q) { q[key] = list; }, 'Order ' + key + ' (board)').catch(function (e) {
       if (was) places[key] = was; else delete places[key]; refresh(); failed(e);
     });
+  }
+  // Favourite (user, 2026-11-08: "create also Favourite after live"): a mark beside Top, Keep and Waiting, on icons of
+  // any group; favourites.json in the data repository, the codes in the user's order (new ones at the end, dragging
+  // inside Favourite places them). Key F, the right-click menu, the star in Look, or a drop on Favourite in the list.
+  function isFav(it) { return favs.indexOf(it.code) >= 0; }
+  function setFavs(list, label, message) {
+    var was = favs; favs = list; refresh();
+    did(label, function () { setFavs(was, label, 'Favourite (undo, board)'); });
+    writeJson('favourites.json', [], function () { return list; }, message).catch(function (e) { favs = was; refresh(); failed(e); });
+  }
+  function fav(codes, on) {   // on: true adds, false removes, undefined toggles (all in when any is out)
+    if (on == null) on = codes.some(function (c) { return favs.indexOf(c) < 0; });
+    var list = favs.filter(function (c) { return codes.indexOf(c) < 0; });
+    if (on) list = favs.concat(codes.filter(function (c) { return favs.indexOf(c) < 0; }));
+    setFavs(list, (on ? 'favourite ' : 'unfavourite ') + J(codes), (on ? 'Favourite ' : 'Unfavourite ') + codes.join(', ') + ' (board)');
+    toast((on ? 'Favourite: ' : 'No longer favourite: ') + J(codes));
+  }
+  function favPlace(spot, codes) {   // a drop inside Favourite: the dropped icons in front of spot.card
+    var list = spot.cards.map(function (c) { return c.dataset.code; }).filter(function (c) { return codes.indexOf(c) < 0; });
+    var i = spot.card ? list.indexOf(spot.card.dataset.code) : list.length;
+    list.splice.apply(list, [i, 0].concat(codes));
+    var rest = favs.filter(function (c) { return list.indexOf(c) < 0; });   // favourites not shown (deleted) keep their place at the end
+    list = list.concat(rest);
+    if (list.join() === favs.join()) return refresh();
+    setFavs(list, 'favourite order', 'Favourite order (board)');
   }
   function forever(codes) {   // as in Gmail's Trash: gone from the board at once, files removed by the data repository's workflow
     var was = {}; codes.forEach(function (c) { was[c] = trash[c]; trash[c] = 'forever'; });
@@ -639,7 +671,7 @@ section.ph .hole { height: 90px; border-radius: 10px; display: flex; align-items
   function load() {
     return Promise.all([fetch(API + repo + '/contents/index.json', { headers: head, cache: 'no-store' }).then(function (r) {
       refused(r); if (!r.ok) throw new Error('index.json: ' + r.status); return r.json();
-    }), readTrash(), readJson('order.json', []).then(function (o) { order = o; }), readJson('places.json', {}).then(function (q) { places = q; })]).then(function (res) {
+    }), readTrash(), readJson('order.json', []).then(function (o) { order = o; }), readJson('places.json', {}).then(function (q) { places = q; }), readJson('favourites.json', []).then(function (f) { favs = f; })]).then(function (res) {
       data = res[0]; byCode = {}; sortProjects(); data.items.forEach(function (it) { byCode[it.code.toUpperCase()] = it; });
       picked = picked.filter(function (c) { return byCode[c.toUpperCase()]; });
       loaded = Date.now();
@@ -667,7 +699,8 @@ section.ph .hole { height: 90px; border-radius: 10px; display: flex; align-items
       s.appendChild(a);
       return a;
     }
-    nav('live', 'Live on sites', count(function (it) { return st(it) === 'live'; }));
+    nav('live', 'Live', count(function (it) { return st(it) === 'live'; }));
+    dropOn(nav('favourite', 'Favourite', count(isFav)), 'favourite');
     dropOn(nav('top', 'Top', count(function (it) { return st(it) === 'top' || st(it) === 'live'; })), 'top');
     nav('inspiration', 'Inspiration', count(function (it) { return it.project === 'inspiration'; }));
     var nDel = data.items.filter(binned).length;
@@ -701,6 +734,7 @@ section.ph .hole { height: 90px; border-radius: 10px; display: flex; align-items
     return data.items.filter(function (it) {
       if (gone(it)) return false;
       if (v === 'live') return st(it) === 'live';
+      if (v === 'favourite') return isFav(it);
       if (v === 'top') return st(it) === 'top' || st(it) === 'live';
       return it.project === v;
     });
@@ -709,7 +743,7 @@ section.ph .hole { height: 90px; border-radius: 10px; display: flex; align-items
   // a view that does not exist (first visit, a group deleted or renamed, an old link) falls back to the first group in
   // the list as it is ordered now, so no group name is fixed in the code (user, 2026-11-07)
   function fallback() {
-    var fixed = ['live', 'top', 'inspiration', 'deleted'];
+    var fixed = ['live', 'favourite', 'top', 'inspiration', 'deleted'];
     if (fixed.indexOf(state.view) >= 0 || data.projects.some(function (p) { return p.id === state.view; })) return;
     state.view = data.projects.length ? data.projects[0].id : 'live'; state.status = 'all'; setHash();
   }
@@ -717,7 +751,7 @@ section.ph .hole { height: 90px; border-radius: 10px; display: flex; align-items
     fallback();
     var v = state.view, all = inView();
     var p = data.projects.filter(function (p) { return p.id === v; })[0];
-    $('title').textContent = p ? p.title + ' · ' + L(p.prefix) : v === 'live' ? 'Live on sites' : v === 'top' ? 'Top' : v === 'deleted' ? 'Deleted' : 'Inspiration';
+    $('title').textContent = p ? p.title + ' · ' + L(p.prefix) : v === 'live' ? 'Live' : v === 'favourite' ? 'Favourite' : v === 'top' ? 'Top' : v === 'deleted' ? 'Deleted' : 'Inspiration';
     var chips = $('chips'); chips.innerHTML = '';
     if (p) STATUS.forEach(function (s) {
       var n = s[0] === 'all' ? all.length : all.filter(function (it) { return st(it) === s[0]; }).length;
@@ -737,6 +771,8 @@ section.ph .hole { height: 90px; border-radius: 10px; display: flex; align-items
       var sub = 'restorable for a day; Delete forever removes them now';
       group('Deleted icons', sub, recent.filter(function (it) { return ICONLIKE[it.kind]; }));
       group('Deleted images', sub, recent.filter(function (it) { return !ICONLIKE[it.kind]; }));
+    } else if (v === 'favourite') {
+      group('Favourite', 'from every group, in your order', items.slice().sort(function (a, b) { return favs.indexOf(a.code) - favs.indexOf(b.code); }), true);
     } else if (v === 'live' || v === 'top') {
       group(v === 'live' ? 'Each project\u2019s icon on its site now' : 'Live and top sets', '', items);
     } else if (v === 'inspiration') {
@@ -764,7 +800,7 @@ section.ph .hole { height: 90px; border-radius: 10px; display: flex; align-items
     groups.forEach(function (g) {
       // in a project, the Top, Keep and Waiting groups take icons dropped anywhere on them (user, 2026-11-07);
       // an empty Top or Keep shows only while dragging
-      var to = p && { Top: 'top', Keep: 'kept', Waiting: 'waiting' }[g[0]], sec = box.appendChild(el('section', to ? 'zone' + (g[2].length ? '' : ' ph') : ''));
+      var to = v === 'favourite' ? 'favourite' : p && { Top: 'top', Keep: 'kept', Waiting: 'waiting' }[g[0]], sec = box.appendChild(el('section', to ? 'zone' + (g[2].length ? '' : ' ph') : ''));
       if (to) dropOn(sec, to);
       var h = el('h2', 'pickable', g[0]); if (g[1]) h.appendChild(el('span', 'sub', g[1])); h.title = 'Select all of these';
       sec.appendChild(el('div')).appendChild(h);
@@ -808,10 +844,11 @@ section.ph .hole { height: 90px; border-radius: 10px; display: flex; align-items
       c.oncontextmenu = function (e) { if (e.shiftKey) return; e.preventDefault(); toast('Being copied, a moment'); };
       return c;
     }
-    var cross = state.view === 'live' || state.view === 'top';
+    var cross = state.view === 'live' || state.view === 'top' || state.view === 'favourite';
     var t = cross ? (data.projects.filter(function (p) { return p.id === it.project; })[0] || {}).title : !ICONLIKE[it.kind] && it.title;
     if (t) m.appendChild(el('span', 't', t));
     if ((st(it) === 'live' || st(it) === 'top') && !(cross && state.view === 'live')) m.appendChild(el('span', 'badge', st(it)));
+    if (isFav(it) && state.view !== 'favourite') m.appendChild(el('span', 'fav', '\u2605'));
     c.onclick = function () { pick(it.code, c); last = it.code; };
     c.draggable = true; img.draggable = false;
     c.ondragstart = function (e) { dragStart(e, it.code, c); };
@@ -848,6 +885,11 @@ section.ph .hole { height: 90px; border-radius: 10px; display: flex; align-items
         if (m[0] === 'waiting' && icons.some(function (x) { return x.kind === 'set'; })) return;
         item('Move to ' + m[1], m[2], function () { mark(codes, m[0]); });
       });
+    }
+    if (state.view !== 'deleted') {
+      line();
+      var allFav = codes.every(function (c) { return favs.indexOf(c) >= 0; });
+      item(allFav ? 'Remove from Favourite' : 'Add to Favourite', 'F', function () { fav(codes, !allFav); });
     }
     line();
     if (state.view === 'deleted') { item('Restore', '', function () { restore(codes); }); item('Delete forever', 'Del', function () { forever(codes); }); }
@@ -936,7 +978,9 @@ section.ph .hole { height: 90px; border-radius: 10px; display: flex; align-items
     cp.onclick = function () { copy(L(it.code)); };
     var del = el('button', 'btn', gone(it) ? 'Restore' : 'Delete');
     del.onclick = function () { close(); if (gone(it)) restore([it.code]); else remove([it.code]); };
-    acts.appendChild(cp); acts.appendChild(del);
+    var fv0 = el('button', 'btn', isFav(it) ? '\u2605 Favourite' : '\u2606 Favourite'); fv0.title = 'F';
+    fv0.onclick = function () { fav([it.code]); open(it); };
+    acts.appendChild(cp); if (!gone(it)) acts.appendChild(fv0); acts.appendChild(del);
     if (binned(it)) { var fv = el('button', 'btn', 'Delete forever'); fv.onclick = function () { close(); forever([it.code]); }; acts.appendChild(fv); }
     info.appendChild(acts);
     if (binned(it)) info.appendChild(el('p', 'note', 'Deleted ' + new Date(trash[it.code]).toLocaleString() + '. Restorable for a day; removed for good after that when Claude next works on the icons, or now with Delete forever.'));
@@ -962,6 +1006,7 @@ section.ph .hole { height: 90px; border-radius: 10px; display: flex; align-items
     if (!open_ && (e.key === 'Delete' || e.key === 'Backspace') && picked.length) { e.preventDefault(); return (state.view === 'deleted' ? $('forever') : $('del')).onclick(); }
     var mk = { t: 'top', k: 'kept', w: 'waiting' }[e.key.toLowerCase()];
     if (!open_ && mk && picked.length && state.view !== 'deleted') { e.preventDefault(); return mark(picked.slice(), mk); }
+    if (e.key.toLowerCase() === 'f' && state.view !== 'deleted' && (open_ ? current : picked.length)) { e.preventDefault(); fav(open_ ? [current] : picked.slice()); if (open_) open(byCode[current.toUpperCase()]); return; }
     if (!open_ && e.key.toLowerCase() === 'c' && picked.length) { e.preventDefault(); return copy(J(picked)); }
     if (e.key.toLowerCase() === 'l') { e.preventDefault(); return theme(); }
     if (open_ && (e.key === 'ArrowLeft' || e.key === 'ArrowRight')) {
@@ -971,7 +1016,7 @@ section.ph .hole { height: 90px; border-radius: 10px; display: flex; align-items
       return;
     }
     if (!open_ && (e.key === 'ArrowDown' || e.key === 'ArrowUp')) {
-      var views = ['live', 'top', 'inspiration'].concat(data.items.some(binned) ? ['deleted'] : [], data.projects.map(function (p) { return p.id; }));
+      var views = ['live', 'favourite', 'top', 'inspiration'].concat(data.items.some(binned) ? ['deleted'] : [], data.projects.map(function (p) { return p.id; }));
       var j = views.indexOf(state.view) + (e.key === 'ArrowDown' ? 1 : -1);
       if (j < 0 || j >= views.length) return;
       e.preventDefault(); state.view = views[j]; state.status = 'all'; go();
@@ -1005,7 +1050,7 @@ section.ph .hole { height: 90px; border-radius: 10px; display: flex; align-items
   function readHash() {
     var last = null; if (!location.hash.slice(1)) { try { last = localStorage.getItem('board-view'); } catch (e) {} }
     var h = (last !== null ? last : decodeURIComponent(location.hash.slice(1))).split('/');
-    var views = ['live', 'top', 'inspiration', 'deleted'].concat(data.projects.map(function (p) { return p.id; }));
+    var views = ['live', 'favourite', 'top', 'inspiration', 'deleted'].concat(data.projects.map(function (p) { return p.id; }));
     if (views.indexOf(h[0]) >= 0) state.view = h[0];
     if (STATUS.some(function (s) { return s[0] === h[1]; })) state.status = h[1];
     var code = (h[2] || h[1] || '').toUpperCase();
