@@ -11,14 +11,28 @@
 <link rel="apple-touch-icon" href="apple-touch-icon.png">
 <style>
 :root {
-  /* dark: the page is Chrome's bookmark bar, so icons are seen as in the browser (user, 2026-11-08); Chrome's
-     toolbar and bookmark bar are one colour, #3c3c3c dark and #fff light (Chromium kColorToolbar = kColorSysBase) */
+  /* backgrounds (user, 2026-11-08): the button top right steps through five, the bars an icon sits on in the
+     browser; the others are within a shade of one of these. Values from the browsers' source (favicon-skill lessons). */
+  --bg: #1c1c1c; --side: #181818; --card: #262626; --hover: #2e2e2e; --line: #303030;
+  --text: #ececec; --muted: #9a9a9a; --faint: #6c6c6c;
+  --tag: #8a8a8a;
+  --nav: #cfcfcf; --on: #2c2c2c; --head: rgba(28,28,28,.94); --pop: #2a2a2a; --pop2: #3a3a3a; --pophover: #363636;
+  --hl: #3d3d3d; --sel: #8a8a8a; --view: #202020; --edge: #444;
+  --font: ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, Roboto, Helvetica, Arial, sans-serif;
+}
+/* Chrome's dark bookmark bar and active tab */
+:root.chrome-dark {
   --bg: #3c3c3c; --side: #383838; --card: #464646; --hover: #4e4e4e; --line: #505050;
-  --text: #ececec; --muted: #b0b0b0; --faint: #8c8c8c;
-  --tag: #a4a4a4;
+  --muted: #b0b0b0; --faint: #8c8c8c; --tag: #a4a4a4;
   --nav: #dcdcdc; --on: #4c4c4c; --head: rgba(60,60,60,.94); --pop: #4a4a4a; --pop2: #5a5a5a; --pophover: #565656;
   --hl: #5d5d5d; --sel: #a4a4a4; --view: #3c3c3c; --edge: #646464;
-  --font: ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, Roboto, Helvetica, Arial, sans-serif;
+}
+/* Firefox's dark toolbar, violet grey */
+:root.firefox-dark {
+  --bg: #2b2a33; --side: #27262f; --card: #35343e; --hover: #3d3c46; --line: #3f3e48;
+  --muted: #a8a7b0; --faint: #84838c; --tag: #9a99a2;
+  --nav: #d6d5dc; --on: #3b3a44; --head: rgba(43,42,51,.94); --pop: #393842; --pop2: #494852; --pophover: #45444e;
+  --hl: #4c4b55; --sel: #9a99a2; --view: #2b2a33; --edge: #55545e;
 }
 /* light (user, 2026-11-07: "i liked seeing things on white as well"), switched in the header */
 :root.light {
@@ -26,6 +40,12 @@
   --text: #222; --muted: #666; --faint: #999; --tag: #777;
   --nav: #333; --on: #ebebeb; --head: rgba(255,255,255,.94); --pop: #fff; --pop2: #e8e8e8; --pophover: #f2f2f2;
   --hl: #dedede; --sel: #777; --view: #eaeaea; --edge: #bbb;
+}
+/* Chrome's light tab strip, behind the tabs not chosen */
+:root.light.strip {
+  --bg: #d3e3fd; --side: #d3e3fd; --card: #dfeafd; --hover: #c6d8f7; --line: #bccfee;
+  --on: #c2d5f5; --head: rgba(211,227,253,.94); --pop: #e6eefc; --pop2: #c2d5f5; --pophover: #d9e6fc;
+  --hl: #b5cbee; --view: #d3e3fd; --edge: #9fb6da;
 }
 * { box-sizing: border-box; }
 html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text); font: 15px/1.45 var(--font); }
@@ -181,7 +201,7 @@ section.ph .hole { height: 90px; border-radius: 10px; display: flex; align-items
       <div class="top"><button id="menu" aria-label="Menu">&#9776;</button><h1 id="title"></h1>
         <div class="chips" id="chips"></div>
         <input id="find" type="search" placeholder="Go to code" autocomplete="off" spellcheck="false">
-        <button id="theme" class="chip" title="Light or dark background (L)">Light</button></div>
+        <button id="theme" class="chip" style="width:140px" title="Background (L)">Dark</button></div>
     </header>
     <div id="content"></div>
   </main>
@@ -1077,14 +1097,24 @@ section.ph .hole { height: 90px; border-radius: 10px; display: flex; align-items
       var on = document.querySelector('.nav.on'); if (on) on.scrollIntoView({ block: 'nearest' });
     }
   });
-  // light or dark background, kept in this browser
-  function theme(light) {
-    if (light == null) light = !document.documentElement.classList.contains('light');
-    document.documentElement.classList.toggle('light', light);
-    $('theme').textContent = light ? 'Dark' : 'Light';
-    try { localStorage.setItem('board-theme', light ? 'light' : 'dark'); } catch (e) {}
+  // background, kept in this browser: the button and L step to the next (user, 2026-11-08: no menu)
+  var BGS = [{ id: 'dark', name: 'Dark', cls: '' },
+             { id: 'chrome-dark', name: 'Chrome dark', cls: 'chrome-dark' },
+             { id: 'firefox-dark', name: 'Firefox dark', cls: 'firefox-dark' },
+             { id: 'light', name: 'Light', cls: 'light' },
+             { id: 'strip', name: 'Chrome tab strip', cls: 'light strip' }];
+  var bgAt = 0;
+  function theme(id) {
+    var i = id == null ? (bgAt + 1) % BGS.length : BGS.findIndex(function (b) { return b.id === id; });
+    if (i < 0) i = 0;
+    bgAt = i; var root = document.documentElement;
+    BGS.forEach(function (b) { b.cls.split(' ').forEach(function (c) { if (c) root.classList.remove(c); }); });
+    BGS[i].cls.split(' ').forEach(function (c) { if (c) root.classList.add(c); });
+    $('theme').textContent = BGS[i].name;
+    $('theme').title = 'Background: ' + BGS[i].name + '. Click or L for ' + BGS[(i + 1) % BGS.length].name;
+    try { localStorage.setItem('board-theme', BGS[i].id); } catch (e) {}
   }
-  (function () { var t = null; try { t = localStorage.getItem('board-theme'); } catch (e) {} theme(t === 'light'); })();
+  (function () { var t = null; try { t = localStorage.getItem('board-theme'); } catch (e) {} theme(t || 'dark'); })();
   $('theme').onclick = function () { theme(); };
   $('menu').onclick = function () { document.body.classList.toggle('menu'); };
   $('find').onkeydown = function (e) {
