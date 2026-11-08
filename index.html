@@ -356,7 +356,16 @@ section.ph .hole { height: 90px; border-radius: 10px; display: flex; align-items
   // Cmd+Z / Ctrl+Z (user, 2026-11-07): takes back the last change on the board, step by step: delete, restore, moves to
   // Top, Keep or Waiting, the order in Top and Keep, the project list. Delete forever cannot be taken back.
   var undos = [], undoing = false;
-  function L(c) { return String(c).toLowerCase(); }   // codes are shown in lowercase (user, 2026-11-07); files keep AB-227
+  // codes are shown in lowercase and without the dash (user, 2026-11-07 and 2026-11-08): lt63; files keep LT-63
+  function L(c) { return String(c).toLowerCase().replace('-', ''); }
+  // a code as typed or linked (lt63, lt-63, LT 63; an old code from was) to its icon
+  function lookup(c) {
+    var k = String(c || '').toUpperCase().replace(/[\s-]/g, ''), plain = function (x) { return x.toUpperCase().replace('-', ''); };
+    var hit = data.items.filter(function (x) { return plain(x.code) === k; })[0];
+    if (hit) return hit;
+    var was = data.was || {}, old = Object.keys(was).filter(function (x) { return plain(x) === k; })[0];
+    return old ? byCode[String(was[old]).toUpperCase()] : null;
+  }
   function J(cs) { return cs.map(L).join(', '); }
   function did(label, back) { if (undoing) return; undos.push([label, back]); if (undos.length > 50) undos.shift(); }
   function undo() {
@@ -1078,7 +1087,7 @@ section.ph .hole { height: 90px; border-radius: 10px; display: flex; align-items
   $('menu').onclick = function () { document.body.classList.toggle('menu'); };
   $('find').onkeydown = function (e) {
     if (e.key !== 'Enter') return;
-    var c = this.value.trim().toUpperCase().replace(/\s+/g, ''), it = byCode[c] || byCode[(data.was || {})[c]];   // an old code finds the moved icon
+    var it = lookup(this.value);   // lt63, lt-63 or LT-63; an old code finds the moved icon
     if (!it) return toast('No ' + this.value.trim());
     state.view = it.project; state.status = 'all'; go(); open(it); this.value = '';
   };
@@ -1096,8 +1105,8 @@ section.ph .hole { height: 90px; border-radius: 10px; display: flex; align-items
     var views = ['favourite', 'live', 'top', 'inspiration', 'deleted'].concat(data.projects.map(function (p) { return p.id; }));
     if (views.indexOf(h[0]) >= 0) state.view = h[0];
     if (STATUS.some(function (s) { return s[0] === h[1]; })) state.status = h[1];
-    var code = (h[2] || h[1] || '').toUpperCase();
-    if (byCode[code]) setTimeout(function () { open(byCode[code]); }, 0);
+    var hit = lookup(h[2] || h[1]);   // links with lt63 or the older lt-63
+    if (hit) setTimeout(function () { open(hit); }, 0);
   }
 })();
 </script>
