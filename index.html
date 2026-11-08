@@ -928,13 +928,31 @@ section.ph .hole { height: 90px; border-radius: 10px; display: flex; align-items
     $('forever').style.display = state.view === 'deleted' ? '' : 'none';
   }
   $('copy').onclick = function () { copy(J(picked)); };
+  // after a delete the next icon is selected, as in the Finder (user, 2026-11-08), so Del can be pressed again;
+  // the one before when the last of the view went
+  function nextAfter(codes) {
+    var cards = [].slice.call(document.querySelectorAll('#content .card')).map(function (c) { return c.dataset.code; });
+    var at = cards.map(function (c, i) { return codes.indexOf(c) >= 0 ? i : -1; }).filter(function (i) { return i >= 0; });
+    if (!at.length) return null;
+    var rest = function (i) { return cards[i] && codes.indexOf(cards[i]) < 0; };
+    for (var i = Math.max.apply(null, at) + 1; i < cards.length; i++) if (rest(i)) return cards[i];
+    for (i = Math.min.apply(null, at) - 1; i >= 0; i--) if (rest(i)) return cards[i];
+    return null;
+  }
+  function selectNext(code) {
+    if (!code || !byCode[code.toUpperCase()]) return;
+    picked = [code]; last = code;
+    document.body.classList.add('picking'); $('bar').style.display = 'flex'; $('count').textContent = '1 selected';
+    refresh();
+  }
   $('del').onclick = function () {
-    var codes = picked.slice(), back = state.view === 'deleted';
+    var codes = picked.slice(), back = state.view === 'deleted', next = nextAfter(codes);
     $('clear').onclick();
     // in Favourite, Delete only takes the mark off; the icon stays in its group (user, 2026-11-08)
     if (back) restore(codes.filter(function (c) { return trash[c]; })); else if (state.view === 'favourite') fav(codes, false); else remove(codes);
+    selectNext(next);
   };
-  $('forever').onclick = function () { var codes = picked.slice(); $('clear').onclick(); forever(codes.filter(function (c) { return trash[c]; })); };
+  $('forever').onclick = function () { var codes = picked.slice(), next = nextAfter(codes); $('clear').onclick(); forever(codes.filter(function (c) { return trash[c]; })); selectNext(next); };
   $('clear').onclick = function () {
     picked = []; document.querySelectorAll('.card.sel').forEach(function (c) { c.classList.remove('sel'); });
     $('bar').style.display = 'none'; document.body.classList.remove('picking');
