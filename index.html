@@ -699,8 +699,8 @@ section.ph .hole { height: 90px; border-radius: 10px; display: flex; align-items
       s.appendChild(a);
       return a;
     }
+    dropOn(nav('favourite', 'Favourite', count(isFav)), 'favourite');   // first in the list (user, 2026-11-08)
     nav('live', 'Live', count(function (it) { return st(it) === 'live'; }));
-    dropOn(nav('favourite', 'Favourite', count(isFav)), 'favourite');
     dropOn(nav('top', 'Top', count(function (it) { return st(it) === 'top' || st(it) === 'live'; })), 'top');
     nav('inspiration', 'Inspiration', count(function (it) { return it.project === 'inspiration'; }));
     var nDel = data.items.filter(binned).length;
@@ -743,7 +743,7 @@ section.ph .hole { height: 90px; border-radius: 10px; display: flex; align-items
   // a view that does not exist (first visit, a group deleted or renamed, an old link) falls back to the first group in
   // the list as it is ordered now, so no group name is fixed in the code (user, 2026-11-07)
   function fallback() {
-    var fixed = ['live', 'favourite', 'top', 'inspiration', 'deleted'];
+    var fixed = ['favourite', 'live', 'top', 'inspiration', 'deleted'];
     if (fixed.indexOf(state.view) >= 0 || data.projects.some(function (p) { return p.id === state.view; })) return;
     state.view = data.projects.length ? data.projects[0].id : 'live'; state.status = 'all'; setHash();
   }
@@ -1016,7 +1016,7 @@ section.ph .hole { height: 90px; border-radius: 10px; display: flex; align-items
       return;
     }
     if (!open_ && (e.key === 'ArrowDown' || e.key === 'ArrowUp')) {
-      var views = ['live', 'favourite', 'top', 'inspiration'].concat(data.items.some(binned) ? ['deleted'] : [], data.projects.map(function (p) { return p.id; }));
+      var views = ['favourite', 'live', 'top', 'inspiration'].concat(data.items.some(binned) ? ['deleted'] : [], data.projects.map(function (p) { return p.id; }));
       var j = views.indexOf(state.view) + (e.key === 'ArrowDown' ? 1 : -1);
       if (j < 0 || j >= views.length) return;
       e.preventDefault(); state.view = views[j]; state.status = 'all'; go();
@@ -1050,7 +1050,7 @@ section.ph .hole { height: 90px; border-radius: 10px; display: flex; align-items
   function readHash() {
     var last = null; if (!location.hash.slice(1)) { try { last = localStorage.getItem('board-view'); } catch (e) {} }
     var h = (last !== null ? last : decodeURIComponent(location.hash.slice(1))).split('/');
-    var views = ['live', 'favourite', 'top', 'inspiration', 'deleted'].concat(data.projects.map(function (p) { return p.id; }));
+    var views = ['favourite', 'live', 'top', 'inspiration', 'deleted'].concat(data.projects.map(function (p) { return p.id; }));
     if (views.indexOf(h[0]) >= 0) state.view = h[0];
     if (STATUS.some(function (s) { return s[0] === h[1]; })) state.status = h[1];
     var code = (h[2] || h[1] || '').toUpperCase();
