@@ -853,7 +853,7 @@ section.ph .hole { height: 90px; border-radius: 10px; display: flex; align-items
     if (t) m.appendChild(el('span', 't', t));
     if ((st(it) === 'live' || st(it) === 'top') && !(cross && state.view === 'live')) m.appendChild(el('span', 'badge', st(it)));
     if (isFav(it) && state.view !== 'favourite') m.appendChild(el('span', 'fav', '\u2605'));
-    c.onclick = function () { pick(it.code, c); last = it.code; };
+    c.onclick = function (e) { click(e, it.code, c); };
     c.draggable = true; img.draggable = false;
     c.ondragstart = function (e) { dragStart(e, it.code, c); };
     c.ondragend = dragEnd;
@@ -916,6 +916,23 @@ section.ph .hole { height: 90px; border-radius: 10px; display: flex; align-items
         }, 'image/png');
       }; img.src = u;
     });
+  }
+  // clicks as with files in the Finder (user, 2026-11-08): a click selects that icon alone, Shift+click every icon
+  // from the last one clicked to this one, Cmd (Ctrl) + click adds or takes off one icon
+  function click(e, code, c) {
+    var cards = [].slice.call(document.querySelectorAll('#content .card'));
+    if (e.shiftKey && last && picked.length) {
+      var codes = cards.map(function (x) { return x.dataset.code; }), a = codes.indexOf(last), b = codes.indexOf(code);
+      if (a >= 0 && b >= 0) {
+        for (var i = Math.min(a, b); i <= Math.max(a, b); i++) if (picked.indexOf(codes[i]) < 0) pick(codes[i], cards[i]);
+        return;
+      }
+    }
+    if (e.metaKey || e.ctrlKey) { pick(code, c); last = code; return; }
+    var only = picked.length === 1 && picked[0] === code;
+    $('clear').onclick();
+    if (!only) pick(code, c);   // a click on the one selected icon takes it off
+    last = code;
   }
   function pick(code, c) {
     var i = picked.indexOf(code);
