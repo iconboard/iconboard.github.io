@@ -653,7 +653,12 @@ section.ph .hole { height: 90px; border-radius: 10px; display: flex; align-items
   }
   // one commit to the data repository: read the files at the head of main, make(texts) returns {message, files:
   // {path: text}, links: {path: sha}, result} or null; if someone else wrote in between, start again from the new head
-  function commitData(paths, make, tries) {
+  var writing = 0;                      // commits of the page itself under way (the reload below waits for them)
+  function commitData(paths, make) {
+    writing++;
+    return commitTry(paths, make).then(function (x) { writing--; return x; }, function (e) { writing--; throw e; });
+  }
+  function commitTry(paths, make, tries) {
     var ref, out;
     return api('/git/ref/heads/main').then(function (r) { ref = r.object.sha; return api('/git/commits/' + ref); }).then(function (c) {
       var base = c.tree.sha;
@@ -667,7 +672,7 @@ section.ph .hole { height: 90px; border-radius: 10px; display: flex; align-items
           .then(function (c) { return api('/git/refs/heads/main', { method: 'PATCH', body: JSON.stringify({ sha: c.sha }) }); });
       });
     }).then(function () { return out && out.result; }, function (e) {
-      if ((e.status === 422 || e.status === 409) && (tries || 0) < 4) return commitData(paths, make, (tries || 0) + 1);
+      if ((e.status === 422 || e.status === 409) && (tries || 0) < 4) return commitTry(paths, make, (tries || 0) + 1);
       throw e;
     });
   }
@@ -745,6 +750,20 @@ section.ph .hole { height: 90px; border-radius: 10px; display: flex; align-items
     if (document.visibilityState !== 'visible' || !data || dragCodes || Date.now() - loaded < 60000) return;
     load().then(function () { refresh(); prefetch(); }).catch(function () {});
   });
+  // and while it stays open (user, 2026-11-10: "every time when I modify icons, the icon board should be informed"):
+  // every 15 s the data repository's last commit is asked for (40 characters); when it changed (an icon applied to a
+  // site, a proposal pushed, another tab's move) the board reads everything again. Not during a drag or the page's own
+  // writes, which show their result already.
+  var lastCommit = null;
+  setInterval(function () {
+    if (document.visibilityState !== 'visible' || !data || dragCodes || writing) return;
+    fetch(API + repo + '/commits/main', { headers: { Authorization: 'Bearer ' + token, Accept: 'application/vnd.github.sha' }, cache: 'no-store' })
+      .then(function (r) { return r.ok ? r.text() : null; }).then(function (sha) {
+        if (!sha) return;
+        var was = lastCommit; lastCommit = sha;
+        if (was && was !== sha && !dragCodes && !writing) return load().then(function () { refresh(); prefetch(); });
+      }).catch(function () {});
+  }, 15000);
   load().then(function () {
     $('login').style.display = 'none'; $('app').style.display = 'flex';
     readHash(); fallback(); setHash(); side(); show(); setTimeout(prefetch, 0);
@@ -763,9 +782,9 @@ section.ph .hole { height: 90px; border-radius: 10px; display: flex; align-items
       s.appendChild(a);
       return a;
     }
-    dropOn(nav('favourite', 'Favourite', count(isFav)), 'favourite');   // first in the list (user, 2026-11-08)
+    nav('live', 'Live', count(function (it) { return st(it) === 'live'; }));   // first in the list (user, 2026-11-10: "put live on the top of the list")
+    dropOn(nav('favourite', 'Favourite', count(isFav)), 'favourite');
     dropOn(nav('test', 'Test', count(isTest)), 'test');
-    nav('live', 'Live', count(function (it) { return st(it) === 'live'; }));
     dropOn(nav('top', 'Top', count(function (it) { return st(it) === 'top' || st(it) === 'live'; })), 'top');
     nav('inspiration', 'Inspiration', count(function (it) { return it.project === 'inspiration'; }));
     var nDel = data.items.filter(binned).length;
@@ -1136,7 +1155,7 @@ section.ph .hole { height: 90px; border-radius: 10px; display: flex; align-items
       return;
     }
     if (!open_ && (e.key === 'ArrowDown' || e.key === 'ArrowUp')) {
-      var views = ['favourite', 'test', 'live', 'top', 'inspiration'].concat(data.items.some(binned) ? ['deleted'] : [], data.projects.map(function (p) { return p.id; }));
+      var views = ['live', 'favourite', 'test', 'top', 'inspiration'].concat(data.items.some(binned) ? ['deleted'] : [], data.projects.map(function (p) { return p.id; }));
       var j = views.indexOf(state.view) + (e.key === 'ArrowDown' ? 1 : -1);
       if (j < 0 || j >= views.length) return;
       e.preventDefault(); state.view = views[j]; state.status = 'all'; go();
@@ -1179,7 +1198,7 @@ section.ph .hole { height: 90px; border-radius: 10px; display: flex; align-items
   function readHash() {
     var last = null; if (!location.hash.slice(1)) { try { last = localStorage.getItem('board-view'); } catch (e) {} }
     var h = (last !== null ? last : decodeURIComponent(location.hash.slice(1))).split('/');
-    var views = ['favourite', 'test', 'live', 'top', 'inspiration', 'deleted'].concat(data.projects.map(function (p) { return p.id; }));
+    var views = ['live', 'favourite', 'test', 'top', 'inspiration', 'deleted'].concat(data.projects.map(function (p) { return p.id; }));
     if (views.indexOf(h[0]) >= 0) state.view = h[0];
     if (STATUS.some(function (s) { return s[0] === h[1]; })) state.status = h[1];
     var hit = lookup(h[2] || h[1]);   // links with lt63 or the older lt-63
