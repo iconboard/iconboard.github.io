@@ -6,6 +6,7 @@
 <meta name="robots" content="noindex, nofollow">
 <meta name="color-scheme" content="dark">
 <title>Icon test</title>
+<link rel="icon" id="fav" href="data:,">
 <style>
 :root { --bg: #1c1c1c; --text: #ececec; --muted: #9a9a9a;
   --font: ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, Roboto, Helvetica, Arial, sans-serif; }
@@ -46,12 +47,24 @@ p a { color: var(--text); }
   var raw = { Authorization: 'Bearer ' + token, Accept: 'application/vnd.github.raw' };
   var norm = function (c) { var m = String(c).toUpperCase().replace(/\s/g, '').match(/^([A-Z]+)-?(\d+|[A-Z]+\d*)$/); return m ? m[1] + '-' + m[2] : String(c).toUpperCase(); };
   var shown = function (c) { return c.toLowerCase().replace('-', ''); };
-  var get = function (f) { return fetch(API + f, { headers: raw, cache: 'no-store' }).then(function (r) {
+  var get = function (f) { return fetch(API + f + '?t=' + Date.now(), { headers: raw, cache: 'no-store' }).then(function (r) {
     if (r.status === 404 && f === 'test.json') return [];
     if (!r.ok) throw new Error('the board data answered ' + r.status);
     return r.json();
   }); };
-  Promise.all([get('index.json'), get('test.json')]).then(function (res) {
+  // An icon just put into Test on the board may not be saved on GitHub yet (a second or more): the list is read again
+  // for up to about 15 s before the page says the icon is not in Test.
+  var inTest = function (code, tries) {
+    return get('test.json').then(function (t) {
+      if (t.indexOf(code) >= 0 || !tries) return t;
+      $('note').textContent = 'Waiting for Test to be saved…';
+      return new Promise(function (ok) { setTimeout(ok, 1500); }).then(function () { return inTest(code, tries - 1); });
+    });
+  };
+  get('index.json').then(function (data) {
+    var c0 = norm(q); if ((data.was || {})[c0]) c0 = norm(data.was[c0]);
+    return inTest(c0, 10).then(function (tests) { return [data, tests]; });
+  }).then(function (res) {
     var data = res[0], tests = res[1];
     var code = norm(q), was = data.was || {};
     if (was[code]) code = norm(was[code]);
@@ -69,8 +82,17 @@ p a { color: var(--text); }
     }).then(function (url) {
       var c = shown(it.code);
       document.title = c;
-      var link = document.createElement('link'); link.rel = 'icon'; link.type = type; link.href = url;
-      document.head.appendChild(link);
+      // the tab gets a PNG drawn from the file: an empty icon declared in the head from the start (so Chrome does not
+      // take the site's own /favicon.ico) is replaced by it; Chrome takes a PNG data address more reliably than an SVG one
+      var im = new Image();
+      im.onload = function () {
+        var cv = document.createElement('canvas'); cv.width = cv.height = 64;
+        cv.getContext('2d').drawImage(im, 0, 0, 64, 64);
+        var old = $('fav'), link = document.createElement('link');
+        link.rel = 'icon'; link.id = 'fav'; link.type = 'image/png'; link.sizes = '64x64'; link.href = cv.toDataURL('image/png');
+        old.parentNode.replaceChild(link, old);
+      };
+      im.src = url;
       $('code').textContent = c;
       $('note').textContent = [it.title, it.batch, it.status === 'live' ? 'live on ' + it.where : it.status].filter(Boolean).join(' · ');
       $('big').src = url; $('big').hidden = false;
