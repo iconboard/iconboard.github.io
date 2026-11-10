@@ -111,8 +111,8 @@ h2.pickable:hover { background: var(--hover); color: var(--text); }
 .card.sel { background: var(--hover); }
 .sizes { display: flex; align-items: flex-end; gap: 8px; padding: 0 9px 10px; }
 .sizes img { display: block; flex: none; }
-.card .test { display: block; padding: 0 9px 10px; font-size: 12px; color: var(--muted); text-decoration: underline; overflow-wrap: anywhere; }
-.card .test:hover { color: var(--text); }
+.card .test { display: block; margin: 0 9px 10px; padding: 7px 0; border: 1px solid var(--edge); border-radius: 7px; background: var(--pop); color: var(--text); font-size: 13px; text-align: center; text-decoration: none; cursor: pointer; }
+.card .test:hover { background: var(--pop2); }
 .card .sizes .s32 { width: 32px; height: 32px; } .card .sizes .s16 { width: 16px; height: 16px; }
 .card.sel .tick { background: #777; border-color: #777; }
 .card.sel .tick::after { content: ""; position: absolute; left: 4.5px; top: 1.5px; width: 4px; height: 8px; border: solid #fff; border-width: 0 2px 2px 0; transform: rotate(45deg); }
@@ -840,7 +840,7 @@ section.ph .hole { height: 90px; border-radius: 10px; display: flex; align-items
     } else if (v === 'favourite') {
       group('Favourite', 'from every group, in your order', items.slice().sort(function (a, b) { return favs.indexOf(a.code) - favs.indexOf(b.code); }), true);
     } else if (v === 'test') {
-      group('Test', 'open a link, then bookmark the page; Delete takes the icon out and ends its page', items.slice().sort(function (a, b) { return tests.indexOf(a.code) - tests.indexOf(b.code); }), true);
+      group('Test', 'Open in tab, then bookmark the page; Delete takes the icon out and ends its page', items.slice().sort(function (a, b) { return tests.indexOf(a.code) - tests.indexOf(b.code); }), true);
     } else if (v === 'live' || v === 'top') {
       group(v === 'live' ? 'Each project\u2019s icon on its site now' : 'Live and top sets', '', items);
     } else if (v === 'inspiration') {
@@ -918,7 +918,7 @@ section.ph .hole { height: 90px; border-radius: 10px; display: flex; align-items
     if ((st(it) === 'live' || st(it) === 'top') && !(cross && state.view === 'live')) m.appendChild(el('span', 'badge', st(it)));
     if (isFav(it) && state.view !== 'favourite') m.appendChild(el('span', 'fav', '\u2605'));
     if (state.view === 'test') {
-      var ln = el('a', 'test', '/t/?' + L(it.code)); ln.href = testUrl(it); ln.target = '_blank'; ln.draggable = false;
+      var ln = el('a', 'test', 'Open in tab'); ln.href = testUrl(it); ln.target = '_blank'; ln.draggable = false; ln.title = testUrl(it);
       ln.onclick = function (e) { e.stopPropagation(); }; c.appendChild(ln);
     }
     c.onclick = function (e) { click(e, it.code, c); };
