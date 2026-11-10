@@ -26,7 +26,7 @@ p a { color: var(--text); }
 <body>
 <main>
 <h1 id="code">Icon test</h1>
-<p id="note">Put a code after the address, e.g. <code>/t/?sl3</code>, then bookmark the page.</p>
+<p id="note">Add icons to Test on <a href="/#test">the board</a> and open their links from there.</p>
 <img id="big" alt="" hidden>
 <div class="bars" id="bars"></div>
 </main>
@@ -34,6 +34,7 @@ p a { color: var(--text); }
 // One test page for every icon on the board (user, 2026-11-10: "drop it into bookmarks and see how it looks"):
 // /t/?<code> reads the icon from the board's data with the access kept by the board in this browser, makes it this
 // tab's icon and the code the page title, so a bookmark shows that icon under that code. Nothing is copied or published.
+// Only icons in the board's Test (test.json) are shown: taking an icon out of Test there ends its page here.
 (function () {
   var $ = function (id) { return document.getElementById(id); };
   var q = decodeURIComponent(location.search.slice(1) || location.hash.slice(1)).trim();
@@ -45,14 +46,19 @@ p a { color: var(--text); }
   var raw = { Authorization: 'Bearer ' + token, Accept: 'application/vnd.github.raw' };
   var norm = function (c) { var m = String(c).toUpperCase().replace(/\s/g, '').match(/^([A-Z]+)-?(\d+|[A-Z]+\d*)$/); return m ? m[1] + '-' + m[2] : String(c).toUpperCase(); };
   var shown = function (c) { return c.toLowerCase().replace('-', ''); };
-  fetch(API + 'index.json', { headers: raw, cache: 'no-store' }).then(function (r) {
+  var get = function (f) { return fetch(API + f, { headers: raw, cache: 'no-store' }).then(function (r) {
+    if (r.status === 404 && f === 'test.json') return [];
     if (!r.ok) throw new Error('the board data answered ' + r.status);
     return r.json();
-  }).then(function (data) {
+  }); };
+  Promise.all([get('index.json'), get('test.json')]).then(function (res) {
+    var data = res[0], tests = res[1];
     var code = norm(q), was = data.was || {};
     if (was[code]) code = norm(was[code]);
     var it = data.items.filter(function (x) { return x.code.toUpperCase() === code; })[0];
     if (!it) throw new Error('no icon ' + shown(code) + ' on the board');
+    if (tests.indexOf(it.code) < 0) { document.title = shown(it.code) + ' (not in Test)'; $('code').textContent = shown(it.code);
+      $('note').innerHTML = 'Not in Test any more. Add it again on <a href="/#test">the board</a> to see it here.'; return; }
     var ext = it.path.split('.').pop().toLowerCase();
     var type = { svg: 'image/svg+xml', png: 'image/png', ico: 'image/x-icon', jpg: 'image/jpeg', jpeg: 'image/jpeg', webp: 'image/webp' }[ext] || 'image/png';
     return fetch(API + it.path, { headers: raw }).then(function (r) {

@@ -111,6 +111,8 @@ h2.pickable:hover { background: var(--hover); color: var(--text); }
 .card.sel { background: var(--hover); }
 .sizes { display: flex; align-items: flex-end; gap: 8px; padding: 0 9px 10px; }
 .sizes img { display: block; flex: none; }
+.card .test { display: block; padding: 0 9px 10px; font-size: 12px; color: var(--muted); text-decoration: underline; overflow-wrap: anywhere; }
+.card .test:hover { color: var(--text); }
 .card .sizes .s32 { width: 32px; height: 32px; } .card .sizes .s16 { width: 16px; height: 16px; }
 .card.sel .tick { background: #777; border-color: #777; }
 .card.sel .tick::after { content: ""; position: absolute; left: 4.5px; top: 1.5px; width: 4px; height: 8px; border: solid #fff; border-width: 0 2px 2px 0; transform: rotate(45deg); }
@@ -332,7 +334,7 @@ section.ph .hole { height: 90px; border-radius: 10px; display: flex; align-items
     });
   }
 
-  var data, byCode = {}, picked = [], trash = {}, order = [], favs = [], state = { view: null, status: 'all' };   // view: set from the address, the last one seen, or the first group (fallback)
+  var data, byCode = {}, picked = [], trash = {}, order = [], favs = [], tests = [], state = { view: null, status: 'all' };   // view: set from the address, the last one seen, or the first group (fallback)
   var STATUS = [['all', 'All'], ['live', 'Live'], ['top', 'Top'], ['kept', 'Keep'], ['waiting', 'Waiting'], ['source', 'Sources']];
   var ICONLIKE = { set: 1, proposal: 1 };
 
@@ -456,7 +458,7 @@ section.ph .hole { height: 90px; border-radius: 10px; display: flex; align-items
   }
   function dropOn(node, to) {
     node.dataset.drop = to;
-    var ordered = node.tagName === 'SECTION' && (to === 'top' || to === 'kept' || to === 'favourite');
+    var ordered = node.tagName === 'SECTION' && (to === 'top' || to === 'kept' || to === 'favourite' || to === 'test');
     node.addEventListener('dragover', function (e) { if (!dragCodes) return; e.preventDefault(); node.classList.add('hl'); if (ordered) caret(node, e.clientX, e.clientY); });
     node.addEventListener('dragleave', function (e) { if (!node.contains(e.relatedTarget)) { node.classList.remove('hl'); $('caret').style.display = 'none'; } });
     node.addEventListener('drop', function (e) {
@@ -467,6 +469,11 @@ section.ph .hole { height: 90px; border-radius: 10px; display: flex; align-items
       if (to === 'restore' || (del && to !== 'forever' && to !== 'delete')) return restore(codes.filter(function (c) { return trash[c]; }));
       if (to === 'forever' || (del && to === 'delete')) return forever(codes.filter(function (c) { return trash[c]; }));
       if (to === 'delete') return remove(codes);
+      if (to === 'test') {
+        if (spot) return testPlace(spot, codes);
+        var put = codes.filter(function (c) { return tests.indexOf(c) < 0; });
+        return put.length ? test(put, true) : toast('Already in Test');
+      }
       if (to === 'favourite') {
         if (spot) return favPlace(spot, codes);
         var add = codes.filter(function (c) { return favs.indexOf(c) < 0; });
@@ -522,6 +529,34 @@ section.ph .hole { height: 90px; border-radius: 10px; display: flex; align-items
     list = list.concat(rest);
     if (list.join() === favs.join()) return refresh();
     setFavs(list, 'favourite order', 'Favourite order (board)');
+  }
+  // Test (user, 2026-11-10: "a special section ... drop an icon there, a link would be generated ... if I delete a
+  // certain link from that collection, the page itself should be deleted as well"): test.json in the data
+  // repository, codes in the user's order. Each icon in Test has a link to the test page /t/?<code>, which makes it
+  // the tab icon and its code the page title, to bookmark and see in the browser; the test page shows an icon only
+  // while it is in Test, so taking it out here ends its page. Key B, the right-click menu, Look, a drop on Test.
+  function isTest(it) { return tests.indexOf(it.code) >= 0; }
+  function testUrl(it) { return location.origin + '/t/?' + L(it.code); }
+  function setTests(list, label, message) {
+    var was = tests; tests = list; refresh();
+    did(label, function () { setTests(was, label, 'Test (undo, board)'); });
+    writeJson('test.json', [], function () { return list; }, message).catch(function (e) { tests = was; refresh(); failed(e); });
+  }
+  function test(codes, on) {
+    if (picked.length) $('clear').onclick();
+    if (on == null) on = codes.some(function (c) { return tests.indexOf(c) < 0; });
+    var list = tests.filter(function (c) { return codes.indexOf(c) < 0; });
+    if (on) list = tests.concat(codes.filter(function (c) { return tests.indexOf(c) < 0; }));
+    setTests(list, (on ? 'test ' : 'untest ') + J(codes), (on ? 'Test ' : 'Out of Test ') + codes.join(', ') + ' (board)');
+    toast((on ? 'Added to Test: ' : 'Removed from Test: ') + J(codes));
+  }
+  function testPlace(spot, codes) {
+    var list = spot.cards.map(function (c) { return c.dataset.code; }).filter(function (c) { return codes.indexOf(c) < 0; });
+    var i = spot.card ? list.indexOf(spot.card.dataset.code) : list.length;
+    list.splice.apply(list, [i, 0].concat(codes));
+    list = list.concat(tests.filter(function (c) { return list.indexOf(c) < 0; }));
+    if (list.join() === tests.join()) return refresh();
+    setTests(list, 'test order', 'Test order (board)');
   }
   function forever(codes) {   // as in Gmail's Trash: gone from the board at once, files removed by the data repository's workflow
     if (picked.length) $('clear').onclick();
@@ -700,7 +735,7 @@ section.ph .hole { height: 90px; border-radius: 10px; display: flex; align-items
   function load() {
     return Promise.all([fetch(API + repo + '/contents/index.json', { headers: head, cache: 'no-store' }).then(function (r) {
       refused(r); if (!r.ok) throw new Error('index.json: ' + r.status); return r.json();
-    }), readTrash(), readJson('order.json', []).then(function (o) { order = o; }), readJson('places.json', {}).then(function (q) { places = q; }), readJson('favourites.json', []).then(function (f) { favs = f; })]).then(function (res) {
+    }), readTrash(), readJson('order.json', []).then(function (o) { order = o; }), readJson('places.json', {}).then(function (q) { places = q; }), readJson('favourites.json', []).then(function (f) { favs = f; }), readJson('test.json', []).then(function (t) { tests = t; })]).then(function (res) {
       data = res[0]; byCode = {}; sortProjects(); data.items.forEach(function (it) { byCode[it.code.toUpperCase()] = it; });
       picked = picked.filter(function (c) { return byCode[c.toUpperCase()]; });
       loaded = Date.now();
@@ -729,6 +764,7 @@ section.ph .hole { height: 90px; border-radius: 10px; display: flex; align-items
       return a;
     }
     dropOn(nav('favourite', 'Favourite', count(isFav)), 'favourite');   // first in the list (user, 2026-11-08)
+    dropOn(nav('test', 'Test', count(isTest)), 'test');
     nav('live', 'Live', count(function (it) { return st(it) === 'live'; }));
     dropOn(nav('top', 'Top', count(function (it) { return st(it) === 'top' || st(it) === 'live'; })), 'top');
     nav('inspiration', 'Inspiration', count(function (it) { return it.project === 'inspiration'; }));
@@ -764,6 +800,7 @@ section.ph .hole { height: 90px; border-radius: 10px; display: flex; align-items
       if (gone(it)) return false;
       if (v === 'live') return st(it) === 'live';
       if (v === 'favourite') return isFav(it);
+      if (v === 'test') return isTest(it);
       if (v === 'top') return st(it) === 'top' || st(it) === 'live';
       return it.project === v;
     });
@@ -772,7 +809,7 @@ section.ph .hole { height: 90px; border-radius: 10px; display: flex; align-items
   // a view that does not exist (first visit, a group deleted or renamed, an old link) falls back to the first group in
   // the list as it is ordered now, so no group name is fixed in the code (user, 2026-11-07)
   function fallback() {
-    var fixed = ['favourite', 'live', 'top', 'inspiration', 'deleted'];
+    var fixed = ['favourite', 'test', 'live', 'top', 'inspiration', 'deleted'];
     if (fixed.indexOf(state.view) >= 0 || data.projects.some(function (p) { return p.id === state.view; })) return;
     state.view = data.projects.length ? data.projects[0].id : 'live'; state.status = 'all'; setHash();
   }
@@ -780,7 +817,7 @@ section.ph .hole { height: 90px; border-radius: 10px; display: flex; align-items
     fallback();
     var v = state.view, all = inView();
     var p = data.projects.filter(function (p) { return p.id === v; })[0];
-    $('title').textContent = p ? p.title + ' · ' + L(p.prefix) : v === 'live' ? 'Live' : v === 'favourite' ? 'Favourite' : v === 'top' ? 'Top' : v === 'deleted' ? 'Deleted' : 'Inspiration';
+    $('title').textContent = p ? p.title + ' · ' + L(p.prefix) : v === 'live' ? 'Live' : v === 'favourite' ? 'Favourite' : v === 'test' ? 'Test' : v === 'top' ? 'Top' : v === 'deleted' ? 'Deleted' : 'Inspiration';
     var chips = $('chips'); chips.innerHTML = '';
     if (p) STATUS.forEach(function (s) {
       var n = s[0] === 'all' ? all.length : all.filter(function (it) { return st(it) === s[0]; }).length;
@@ -802,6 +839,8 @@ section.ph .hole { height: 90px; border-radius: 10px; display: flex; align-items
       group('Deleted images', sub, recent.filter(function (it) { return !ICONLIKE[it.kind]; }));
     } else if (v === 'favourite') {
       group('Favourite', 'from every group, in your order', items.slice().sort(function (a, b) { return favs.indexOf(a.code) - favs.indexOf(b.code); }), true);
+    } else if (v === 'test') {
+      group('Test', 'open a link, then bookmark the page; Delete takes the icon out and ends its page', items.slice().sort(function (a, b) { return tests.indexOf(a.code) - tests.indexOf(b.code); }), true);
     } else if (v === 'live' || v === 'top') {
       group(v === 'live' ? 'Each project\u2019s icon on its site now' : 'Live and top sets', '', items);
     } else if (v === 'inspiration') {
@@ -829,7 +868,7 @@ section.ph .hole { height: 90px; border-radius: 10px; display: flex; align-items
     groups.forEach(function (g) {
       // in a project, the Top, Keep and Waiting groups take icons dropped anywhere on them (user, 2026-11-07);
       // an empty Top or Keep shows only while dragging
-      var to = v === 'favourite' ? 'favourite' : p && { Top: 'top', Keep: 'kept', Waiting: 'waiting' }[g[0]], sec = box.appendChild(el('section', to ? 'zone' + (g[2].length ? '' : ' ph') : ''));
+      var to = v === 'favourite' ? 'favourite' : v === 'test' ? 'test' : p && { Top: 'top', Keep: 'kept', Waiting: 'waiting' }[g[0]], sec = box.appendChild(el('section', to ? 'zone' + (g[2].length ? '' : ' ph') : ''));
       if (to) dropOn(sec, to);
       var h = el('h2', 'pickable', g[0]); if (g[1]) h.appendChild(el('span', 'sub', g[1])); h.title = 'Select all of these';
       sec.appendChild(el('div')).appendChild(h);
@@ -873,11 +912,15 @@ section.ph .hole { height: 90px; border-radius: 10px; display: flex; align-items
       c.oncontextmenu = function (e) { if (e.shiftKey) return; e.preventDefault(); toast('Being copied, a moment'); };
       return c;
     }
-    var cross = state.view === 'live' || state.view === 'top' || state.view === 'favourite';
+    var cross = state.view === 'live' || state.view === 'top' || state.view === 'favourite' || state.view === 'test';
     var t = cross ? (data.projects.filter(function (p) { return p.id === it.project; })[0] || {}).title : !ICONLIKE[it.kind] && it.title;
     if (t) m.appendChild(el('span', 't', t));
     if ((st(it) === 'live' || st(it) === 'top') && !(cross && state.view === 'live')) m.appendChild(el('span', 'badge', st(it)));
     if (isFav(it) && state.view !== 'favourite') m.appendChild(el('span', 'fav', '\u2605'));
+    if (state.view === 'test') {
+      var ln = el('a', 'test', '/t/?' + L(it.code)); ln.href = testUrl(it); ln.target = '_blank'; ln.draggable = false;
+      ln.onclick = function (e) { e.stopPropagation(); }; c.appendChild(ln);
+    }
     c.onclick = function (e) { click(e, it.code, c); };
     c.draggable = true; img.draggable = false;
     c.ondragstart = function (e) { dragStart(e, it.code, c); };
@@ -920,9 +963,15 @@ section.ph .hole { height: 90px; border-radius: 10px; display: flex; align-items
       var allFav = codes.every(function (c) { return favs.indexOf(c) >= 0; });
       item(allFav ? 'Remove from Favourite' : 'Add to Favourite', 'F', function () { fav(codes, !allFav); });
     }
+    if (state.view !== 'deleted' && state.view !== 'test') {
+      var allTest = codes.every(function (c) { return tests.indexOf(c) >= 0; });
+      item(allTest ? 'Remove from Test' : 'Add to Test', 'B', function () { test(codes, !allTest); });
+    }
+    if (!many && isTest(it) && state.view !== 'deleted') item('Open test page', '', function () { window.open(testUrl(it), '_blank'); });
     line();
     if (state.view === 'deleted') { item('Restore', '', function () { restore(codes); }); item('Delete forever', 'Del', function () { forever(codes); }); }
     else if (state.view === 'favourite') item('Remove from Favourite', 'Del', function () { $('del').onclick(); });
+    else if (state.view === 'test') item('Remove from Test', 'Del', function () { $('del').onclick(); });
     else item('Delete', 'Del', function () { $('del').onclick(); });
     box.style.display = 'block';
     var w = box.offsetWidth, h = box.offsetHeight;
@@ -966,7 +1015,7 @@ section.ph .hole { height: 90px; border-radius: 10px; display: flex; align-items
     document.body.classList.toggle('picking', picked.length > 0);
     $('bar').style.display = picked.length ? 'flex' : 'none';
     $('count').textContent = picked.length + ' selected';
-    $('del').textContent = state.view === 'deleted' ? 'Restore' : state.view === 'favourite' ? 'Remove from Favourite' : 'Delete';
+    $('del').textContent = state.view === 'deleted' ? 'Restore' : state.view === 'favourite' ? 'Remove from Favourite' : state.view === 'test' ? 'Remove from Test' : 'Delete';
     $('forever').style.display = state.view === 'deleted' ? '' : 'none';
   }
   $('copy').onclick = function () { copy(J(picked)); };
@@ -991,7 +1040,7 @@ section.ph .hole { height: 90px; border-radius: 10px; display: flex; align-items
     var codes = picked.slice(), back = state.view === 'deleted', next = nextAfter(codes);
     $('clear').onclick();
     // in Favourite, Delete only takes the mark off; the icon stays in its group (user, 2026-11-08)
-    if (back) restore(codes.filter(function (c) { return trash[c]; })); else if (state.view === 'favourite') fav(codes, false); else remove(codes);
+    if (back) restore(codes.filter(function (c) { return trash[c]; })); else if (state.view === 'favourite') fav(codes, false); else if (state.view === 'test') test(codes, false); else remove(codes);
     selectNext(next);
   };
   $('forever').onclick = function () { var codes = picked.slice(), next = nextAfter(codes); $('clear').onclick(); forever(codes.filter(function (c) { return trash[c]; })); selectNext(next); };
@@ -1043,12 +1092,14 @@ section.ph .hole { height: 90px; border-radius: 10px; display: flex; align-items
     }
     var acts = el('div', 'acts'), cp = el('button', 'btn main', 'Copy code');
     cp.onclick = function () { copy(L(it.code)); };
-    var unfav = state.view === 'favourite' && !gone(it);
-    var del = el('button', 'btn', gone(it) ? 'Restore' : unfav ? 'Remove from Favourite' : 'Delete');
-    del.onclick = function () { close(); if (gone(it)) restore([it.code]); else if (unfav) fav([it.code], false); else remove([it.code]); };
+    var unfav = state.view === 'favourite' && !gone(it), untest = state.view === 'test' && !gone(it);
+    var del = el('button', 'btn', gone(it) ? 'Restore' : unfav ? 'Remove from Favourite' : untest ? 'Remove from Test' : 'Delete');
+    del.onclick = function () { close(); if (gone(it)) restore([it.code]); else if (unfav) fav([it.code], false); else if (untest) test([it.code], false); else remove([it.code]); };
+    var ts = el('button', 'btn', isTest(it) ? 'Test page' : 'Add to Test'); ts.title = 'B';
+    ts.onclick = function () { if (isTest(it)) window.open(testUrl(it), '_blank'); else { test([it.code], true); open(it); } };
     var fv0 = el('button', 'btn', isFav(it) ? '\u2605 Favourite' : '\u2606 Favourite'); fv0.title = 'F';
     fv0.onclick = function () { fav([it.code]); open(it); };
-    acts.appendChild(cp); if (!gone(it) && !unfav) acts.appendChild(fv0); acts.appendChild(del);
+    acts.appendChild(cp); if (!gone(it) && !unfav) acts.appendChild(fv0); if (!gone(it)) acts.appendChild(ts); acts.appendChild(del);
     if (binned(it)) { var fv = el('button', 'btn', 'Delete forever'); fv.onclick = function () { close(); forever([it.code]); }; acts.appendChild(fv); }
     info.appendChild(acts);
     if (binned(it)) info.appendChild(el('p', 'note', 'Deleted ' + new Date(trash[it.code]).toLocaleString() + '. Restorable for a day; removed for good after that when Claude next works on the icons, or now with Delete forever.'));
@@ -1075,6 +1126,7 @@ section.ph .hole { height: 90px; border-radius: 10px; display: flex; align-items
     var mk = { t: 'top', k: 'kept', w: 'waiting' }[e.key.toLowerCase()];
     if (!open_ && mk && picked.length && state.view !== 'deleted') { e.preventDefault(); return mark(picked.slice(), mk); }
     if (e.key.toLowerCase() === 'f' && state.view !== 'deleted' && (open_ ? current : picked.length)) { e.preventDefault(); fav(open_ ? [current] : picked.slice()); if (open_) open(byCode[current.toUpperCase()]); return; }
+    if (e.key.toLowerCase() === 'b' && state.view !== 'deleted' && (open_ ? current : picked.length)) { e.preventDefault(); test(open_ ? [current] : picked.slice()); if (open_) open(byCode[current.toUpperCase()]); return; }
     if (!open_ && e.key.toLowerCase() === 'c' && picked.length) { e.preventDefault(); return copy(J(picked)); }
     if (e.key.toLowerCase() === 'l') { e.preventDefault(); return theme(); }
     if (open_ && (e.key === 'ArrowLeft' || e.key === 'ArrowRight')) {
@@ -1084,7 +1136,7 @@ section.ph .hole { height: 90px; border-radius: 10px; display: flex; align-items
       return;
     }
     if (!open_ && (e.key === 'ArrowDown' || e.key === 'ArrowUp')) {
-      var views = ['favourite', 'live', 'top', 'inspiration'].concat(data.items.some(binned) ? ['deleted'] : [], data.projects.map(function (p) { return p.id; }));
+      var views = ['favourite', 'test', 'live', 'top', 'inspiration'].concat(data.items.some(binned) ? ['deleted'] : [], data.projects.map(function (p) { return p.id; }));
       var j = views.indexOf(state.view) + (e.key === 'ArrowDown' ? 1 : -1);
       if (j < 0 || j >= views.length) return;
       e.preventDefault(); state.view = views[j]; state.status = 'all'; go();
@@ -1127,7 +1179,7 @@ section.ph .hole { height: 90px; border-radius: 10px; display: flex; align-items
   function readHash() {
     var last = null; if (!location.hash.slice(1)) { try { last = localStorage.getItem('board-view'); } catch (e) {} }
     var h = (last !== null ? last : decodeURIComponent(location.hash.slice(1))).split('/');
-    var views = ['favourite', 'live', 'top', 'inspiration', 'deleted'].concat(data.projects.map(function (p) { return p.id; }));
+    var views = ['favourite', 'test', 'live', 'top', 'inspiration', 'deleted'].concat(data.projects.map(function (p) { return p.id; }));
     if (views.indexOf(h[0]) >= 0) state.view = h[0];
     if (STATUS.some(function (s) { return s[0] === h[1]; })) state.status = h[1];
     var hit = lookup(h[2] || h[1]);   // links with lt63 or the older lt-63
