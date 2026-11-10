@@ -1067,6 +1067,12 @@ section.ph .hole { height: 90px; border-radius: 10px; display: flex; align-items
     picked = []; document.querySelectorAll('.card.sel').forEach(function (c) { c.classList.remove('sel'); });
     $('bar').style.display = 'none'; document.body.classList.remove('picking');
   };
+  // a click on empty space ends the selection, as in the Finder (user, 2026-11-10); Shift or Cmd (Ctrl) keeps it
+  $('app').addEventListener('click', function (e) {
+    if (!picked.length || e.shiftKey || e.metaKey || e.ctrlKey) return;
+    if (e.target.closest('.card, .pickable, button, a, input, select, textarea, label')) return;
+    $('clear').onclick();
+  });
   function copy(text) {
     if (picked.length) $('clear').onclick();
     (navigator.clipboard ? navigator.clipboard.writeText(text) : Promise.reject()).then(function () { toast('Copied ' + text); },
