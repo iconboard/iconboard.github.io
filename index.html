@@ -346,34 +346,56 @@ section.ph .hole { height: 90px; border-radius: 10px; display: flex; align-items
   // restore them. Claude removes the files of items deleted more than a day ago, at its next work on the icons.
   // Delete forever writes "forever" as the time: the data repository's workflow purge.yml then removes the files.
   var jhead = { Authorization: 'Bearer ' + token, Accept: 'application/vnd.github+json' };
-  var shas = {};                        // the sha of each JSON file as last read, for writing it back
-  function readJson(path, empty) {
-    return fetch(API + repo + '/contents/' + path, { headers: jhead, cache: 'no-store' }).then(function (r) {
+    // The board's own changes stay on top of what it reads until GitHub shows them (user, 2026-11-15: deleted icons
+  // came back): a read right after a write, or a reload set off by any new commit (a Claude session's push, the board's
+  // previous delete), can return the file from before the change, and the icon showed again until the next commit.
+  // Which version a read returned is told by the file's blob sha: hist[path] holds the shas this page read before its
+  // writes and the shas it wrote, in order. A finished change is applied again only to a read of a version before its
+  // own write; any other version (its own, or one written by someone else since) drops it. Changes still being written
+  // are shown, but never saved by another write.
+  var pending = {}, hist = {}, wrote = {};
+  function note(path, sha) { var h = hist[path] = hist[path] || []; if (sha && h[h.length - 1] !== sha) { h.push(sha); if (h.length > 50) h.shift(); } }
+  function older(path, a, b) { var h = hist[path] || [], i = h.indexOf(a); return i >= 0 && i < h.lastIndexOf(b); }
+  function overlay(path, obj, sha, write) {   // write: for a PUT, so changes of other writes under way are left out
+    var now = Date.now();
+    pending[path] = (pending[path] || []).filter(function (p) {
+      if (p.done && (now > p.done + 120000 || !older(path, sha, p.sha))) return false;
+      if (p.done || !write) obj = p.change(obj) || obj;
+      return true;
+    });
+    return obj;
+  }
+  function readRaw(path, empty, ref) {   // ref: a commit, so a reload reads the file exactly as it was in it
+    return fetch(API + repo + '/contents/' + path + (ref ? '?ref=' + ref : ''), { headers: jhead, cache: 'no-store' }).then(function (r) {
       if (r.status === 404) return { sha: null, content: '' };
       refused(r); if (!r.ok) throw new Error(path + ': ' + r.status); return r.json();
     }).then(function (j) {
-      shas[path] = j.sha;
-      return j.content ? JSON.parse(decodeURIComponent(escape(atob(j.content.replace(/\n/g, ''))))) : empty;
+      return { sha: j.sha, obj: j.content ? JSON.parse(decodeURIComponent(escape(atob(j.content.replace(/\n/g, ''))))) : empty };
     });
   }
+  function readJson(path, empty, ref) { return readRaw(path, empty, ref).then(function (x) { return overlay(path, x.obj, x.sha); }); }
   function writeJson(path, empty, change, message) {   // re-read, change, write; a second try if someone wrote in between
+    var mine = { change: change }; (pending[path] = pending[path] || []).push(mine);
     var go = function (again) {
-      return readJson(path, empty).then(function (obj) {
-        obj = change(obj) || obj;
+      var base;
+      return readRaw(path, empty).then(function (x) {
+        // a read older than this page's last write is that write's file as far as it goes: write on top of that version
+        base = wrote[path] && older(path, x.sha, wrote[path]) ? wrote[path] : x.sha;
+        var obj = overlay(path, x.obj, x.sha, true); obj = change(obj) || obj;
         var body = { message: message, content: btoa(unescape(encodeURIComponent(JSON.stringify(obj, null, 1) + '\n'))) };
-        if (shas[path]) body.sha = shas[path];
+        if (base) body.sha = base;
         return fetch(API + repo + '/contents/' + path, { method: 'PUT', headers: jhead, body: JSON.stringify(body) });
       }).then(function (r) {
         if (r.status === 409 && !again) return go(true);
         if (!r.ok) return r.json().catch(function () { return {}; }).then(function (j) {
           var e = new Error((j.message || 'error') + ' (' + r.status + ')'); e.readOnly = r.status === 403 || r.status === 404; throw e;
         });
-        return r.json().then(function (j) { shas[path] = j.content.sha; });
+        return r.json().then(function (j) { note(path, base); note(path, j.content.sha); wrote[path] = mine.sha = j.content.sha; mine.done = Date.now(); });
       });
     };
-    return go(false);
+    return go(false).catch(function (e) { pending[path] = (pending[path] || []).filter(function (p) { return p !== mine; }); throw e; });
   }
-  function readTrash() { return readJson('trash.json', {}).then(function (t) { trash = t; }); }
+  function readTrash(ref) { return readJson('trash.json', {}, ref).then(function (t) { trash = t; }); }
   function writeTrash(change, message) { return writeJson('trash.json', {}, function (t) { change(t); }, message); }
   // Cmd+Z / Ctrl+Z (user, 2026-11-07): takes back the last change on the board, step by step: delete, restore, moves to
   // Top, Keep or Waiting, the order in Top and Keep, the project list. Delete forever cannot be taken back.
@@ -742,10 +764,11 @@ section.ph .hole { height: 90px; border-radius: 10px; display: flex; align-items
   // everything the board reads; called at the start and when the tab is shown again after a minute
   // (user, 2026-11-07: a tab left open showed old icons)
   var loaded = 0;
-  function load() {
-    return Promise.all([fetch(API + repo + '/contents/index.json', { headers: head, cache: 'no-store' }).then(function (r) {
+  function load(ref) {   // ref: the commit the 15 s check saw, so every file is read as it is in that commit
+    var at = ref ? '?ref=' + ref : '';
+    return Promise.all([fetch(API + repo + '/contents/index.json' + at, { headers: head, cache: 'no-store' }).then(function (r) {
       refused(r); if (!r.ok) throw new Error('index.json: ' + r.status); return r.json();
-    }), readTrash(), readJson('order.json', []).then(function (o) { order = o; }), readJson('places.json', {}).then(function (q) { places = q; }), readJson('favourites.json', []).then(function (f) { favs = f; }), readJson('test.json', []).then(function (t) { tests = t; })]).then(function (res) {
+    }), readTrash(ref), readJson('order.json', [], ref).then(function (o) { order = o; }), readJson('places.json', {}, ref).then(function (q) { places = q; }), readJson('favourites.json', [], ref).then(function (f) { favs = f; }), readJson('test.json', [], ref).then(function (t) { tests = t; })]).then(function (res) {
       data = res[0]; byCode = {}; sortProjects(); data.items.forEach(function (it) { byCode[it.code.toUpperCase()] = it; });
       picked = picked.filter(function (c) { return byCode[c.toUpperCase()]; });
       loaded = Date.now();
@@ -759,14 +782,14 @@ section.ph .hole { height: 90px; border-radius: 10px; display: flex; align-items
   // every 15 s the data repository's last commit is asked for (40 characters); when it changed (an icon applied to a
   // site, a proposal pushed, another tab's move) the board reads everything again. Not during a drag or the page's own
   // writes, which show their result already.
-  var lastCommit = null;
+  var lastCommit = null, commitsSeen = {};
   setInterval(function () {
     if (document.visibilityState !== 'visible' || !data || dragCodes || writing) return;
     fetch(API + repo + '/commits/main', { headers: { Authorization: 'Bearer ' + token, Accept: 'application/vnd.github.sha' }, cache: 'no-store' })
       .then(function (r) { return r.ok ? r.text() : null; }).then(function (sha) {
-        if (!sha) return;
-        var was = lastCommit; lastCommit = sha;
-        if (was && was !== sha && !dragCodes && !writing) return load().then(function () { refresh(); prefetch(); });
+        sha = (sha || '').trim(); if (!sha || commitsSeen[sha]) return;   // a commit seen before is an older answer: no step back
+        commitsSeen[sha] = 1; var was = lastCommit; lastCommit = sha;
+        if (was && !dragCodes && !writing) return load(sha).then(function () { refresh(); prefetch(); });
       }).catch(function () {});
   }, 15000);
   load().then(function () {
