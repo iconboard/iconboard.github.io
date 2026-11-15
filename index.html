@@ -62,10 +62,10 @@ a { color: inherit; }
 #side { width: 264px; flex: none; background: var(--side); border-right: 1px solid var(--line); display: flex; flex-direction: column; overflow-y: auto; padding: 14px 10px; }
 .brand { padding: 4px 10px 14px; font-size: 16px; font-weight: 500; color: var(--muted); }
 .label { display: flex; align-items: center; gap: 6px; width: 100%; padding: 14px 10px 6px; color: var(--muted); font-size: 13px; border: 0; background: none; text-align: left; cursor: pointer; }
-.grow { display: flex; align-items: center; gap: 10px; padding: 6px 0; }
 .label .fold { display: inline-block; width: 10px; font-size: 10px; transition: transform .12s; }
 .label.folded .fold { transform: rotate(-90deg); }
 .label .how { margin-left: auto; color: var(--faint); font-size: 12px; }
+.grow { display: flex; align-items: center; gap: 10px; padding: 6px 0; }
 .nav input { flex: 1; min-width: 0; font: inherit; color: var(--text); background: var(--bg); border: 1px solid #999; border-radius: 6px; padding: 1px 6px; }
 .nav { display: flex; align-items: center; gap: 10px; width: 100%; padding: 6px 10px; color: var(--nav); border: 0; border-radius: 10px; background: none; text-align: left; cursor: pointer; }
 .nav:hover { background: var(--hover); }
@@ -481,7 +481,7 @@ section.ph .hole { height: 90px; border-radius: 10px; display: flex; align-items
   function dragEnd() {
     dragCodes = null; $('drops').style.display = 'none'; $('caret').style.display = 'none'; document.body.classList.remove('dragging');
     document.querySelectorAll('.hl').forEach(function (x) { x.classList.remove('hl'); });
-    var dn = document.querySelector('.nav[data-drop="delete"]'); if (dn && !data.items.some(binned) && state.view !== 'deleted') dn.style.display = 'none';
+    var dn = document.querySelector('.nav[data-drop="delete"]'); if (dn && !anyBinned() && state.view !== 'deleted') dn.style.display = 'none';
   }
   function dropOn(node, to) {
     node.dataset.drop = to;
@@ -600,6 +600,7 @@ section.ph .hole { height: 90px; border-radius: 10px; display: flex; align-items
   function refresh() { var y = $('main').scrollTop, z = $('side').scrollTop; fallback(); side(); show(y); $('side').scrollTop = z; }
   function gone(it) { return !!trash[it.code] || !!trash['group:' + it.project]; }
   function binned(it) { return !!trash[it.code] && trash[it.code] !== 'forever' && !trash['group:' + it.project]; }   // what the Deleted view shows (a deleted group's icons go with it)
+  function anyBinned() { return data.items.some(binned) || groupsBinned().length > 0; }   // Deleted shown in the list
   function groupGone(p) { return !!trash['group:' + p.id]; }
   function groupsBinned() { return data.projects.filter(function (p) { var t = trash['group:' + p.id]; return t && t !== 'forever'; }); }
   // a whole project or collection deleted (user, 2026-11-15: "enable deleting whole projects too"; named in the menu by
@@ -607,9 +608,10 @@ section.ph .hole { height: 90px; border-radius: 10px; display: flex; align-items
   // from Deleted for a day; the data repository's purge.py then removes its folder. Not one with an icon live on a site,
   // nor one whose sets before-colours.json keeps
   function deleteGroup(p) {
+    if (picked.length) $('clear').onclick();
     var kind = coll(p) ? 'collection' : 'project', live = data.items.some(function (it) { return it.project === p.id && st(it) === 'live'; });
     if (live) return toast('Not deleted: an icon of ' + p.title + ' is live on a site. Take it off the site first.', 'OK', function () {});
-    if (keepSets.indexOf('"' + p.prefix + '-') >= 0) return toast('Not deleted: ' + p.title + ' holds sets of before-colours, the icons to go back to.', 'OK', function () {});
+    if (new RegExp('"' + p.prefix + '-\\d+"').test(keepSets)) return toast('Not deleted: ' + p.title + ' holds sets of before-colours, the icons to go back to.', 'OK', function () {});
     var key = 'group:' + p.id, at = new Date().toISOString();
     trash[key] = at; refresh();
     did('delete ' + kind + ' ' + p.title, function () { restoreGroup(p); });
@@ -619,7 +621,7 @@ section.ph .hole { height: 90px; border-radius: 10px; display: flex; align-items
   }
   function restoreGroup(p, forever_) {
     var key = 'group:' + p.id, was = trash[key];
-    if (forever_) { trash[key] = 'forever'; undos = []; } else delete trash[key];
+    if (forever_) { trash[key] = 'forever'; undos = []; } else { delete trash[key]; did('restore ' + p.title, function () { deleteGroup(p); }); }
     refresh();
     writeTrash(function (t) { if (forever_) t[key] = 'forever'; else delete t[key]; }, (forever_ ? 'Delete forever ' : 'Restore ') + p.id + ' (board)').then(function () {
       toast((forever_ ? 'Deleted forever ' : 'Restored ') + p.title);
@@ -1175,9 +1177,7 @@ section.ph .hole { height: 90px; border-radius: 10px; display: flex; align-items
     else if (state.view === 'favourite') item('Remove from Favourite', 'Del', function () { $('del').onclick(); });
     else if (state.view === 'test') item('Remove from Test', 'Del', function () { $('del').onclick(); });
     else item('Delete', 'Del', function () { $('del').onclick(); });
-    box.style.display = 'block';
-    var w = box.offsetWidth, h = box.offsetHeight;
-    box.style.left = Math.min(e.clientX, innerWidth - w - 8) + 'px'; box.style.top = Math.min(e.clientY, innerHeight - h - 8) + 'px';
+    popAt(box, e);
   }
   function hide() { $('ctx').style.display = 'none'; }
   function popAt(box, e) { box.style.display = 'block'; var w = box.offsetWidth, h = box.offsetHeight; box.style.left = Math.min(e.clientX, innerWidth - w - 8) + 'px'; box.style.top = Math.min(e.clientY, innerHeight - h - 8) + 'px'; }
@@ -1345,7 +1345,7 @@ section.ph .hole { height: 90px; border-radius: 10px; display: flex; align-items
       return;
     }
     if (!open_ && (e.key === 'ArrowDown' || e.key === 'ArrowUp')) {
-      var views = ['live', 'favourite', 'test', 'top', 'inspiration'].concat(data.items.some(binned) ? ['deleted'] : [], listed().map(function (p) { return p.id; }));   // as the list shows them (order, folding)
+      var views = ['live', 'favourite', 'test', 'top', 'inspiration'].concat(anyBinned() ? ['deleted'] : [], listed().map(function (p) { return p.id; }));   // as the list shows them (order, folding)
       var j = views.indexOf(state.view) + (e.key === 'ArrowDown' ? 1 : -1);
       if (j < 0 || j >= views.length) return;
       e.preventDefault(); state.view = views[j]; state.status = 'all'; lastNav = [null, 0]; go();
