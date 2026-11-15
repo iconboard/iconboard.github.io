@@ -61,7 +61,11 @@ a { color: inherit; }
 #app { display: none; height: 100%; }
 #side { width: 264px; flex: none; background: var(--side); border-right: 1px solid var(--line); display: flex; flex-direction: column; overflow-y: auto; padding: 14px 10px; }
 .brand { padding: 4px 10px 14px; font-size: 16px; font-weight: 500; color: var(--muted); }
-.label { padding: 14px 10px 6px; color: var(--muted); font-size: 13px; }
+.label { display: flex; align-items: center; gap: 6px; width: 100%; padding: 14px 10px 6px; color: var(--muted); font-size: 13px; border: 0; background: none; text-align: left; cursor: pointer; }
+.label .fold { display: inline-block; width: 10px; font-size: 10px; transition: transform .12s; }
+.label.folded .fold { transform: rotate(-90deg); }
+.label .how { margin-left: auto; color: var(--faint); font-size: 12px; }
+.nav input { flex: 1; min-width: 0; font: inherit; color: var(--text); background: var(--bg, #fff); border: 1px solid #999; border-radius: 6px; padding: 1px 6px; }
 .nav { display: flex; align-items: center; gap: 10px; width: 100%; padding: 6px 10px; color: var(--nav); border: 0; border-radius: 10px; background: none; text-align: left; cursor: pointer; }
 .nav:hover { background: var(--hover); }
 .nav.on { background: var(--on); color: var(--text); }
@@ -773,6 +777,98 @@ section.ph .hole { height: 90px; border-radius: 10px; display: flex; align-items
   function el(tag, cls, text) { var e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; }
   function count(f) { return data.items.filter(function (it) { return !gone(it) && f(it); }).length; }
 
+  // The list's two parts, Projects and Collections (user, 2026-11-15: "too many now"): each folds by a click on its
+  // heading (a folded part shows only the group open now), and a right click on the heading orders it: My order (the
+  // dragged order, order.json), Date created, Alphabetical, Last modified. Folding and order kept in this browser. The
+  // dates are GitHub's: the oldest and the newest commit touching the group's folder, asked only when such an order is
+  // chosen and kept in this browser (created for good, modified for an hour), so nothing has to be kept in the files.
+  var SORTS = [['mine', 'My order'], ['created', 'Date created'], ['alpha', 'Alphabetical'], ['modified', 'Last modified']];
+  function stored(k, d) { try { return JSON.parse(localStorage.getItem(k)) || d; } catch (e) { return d; } }
+  function keep(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} }
+  var lastNav = [null, 0];
+  var folded = stored('board-folded', {}), sorts = stored('board-sort', { projects: 'mine', collections: 'mine' }), dates = stored('board-dates', {}), dating = false;
+  function shownProjects() {
+    var parts = { projects: [], collections: [] };
+    data.projects.forEach(function (p) { parts[coll(p) ? 'collections' : 'projects'].push(p); });
+    Object.keys(parts).forEach(function (k) {
+      var how = sorts[k] || 'mine', d = function (p, f) { return (dates[p.id] || {})[f] || ''; };
+      if (how === 'alpha') parts[k].sort(function (a, b) { return a.title.localeCompare(b.title, undefined, { sensitivity: 'base' }); });
+      else if (how === 'created' || how === 'modified') {
+        var f = how === 'created' ? 'c' : 'm';   // newest first; a group with no date yet at the end
+        parts[k].sort(function (a, b) { return d(a, f) === d(b, f) ? 0 : !d(a, f) ? 1 : !d(b, f) ? -1 : d(a, f) < d(b, f) ? 1 : -1; });
+      }
+    });
+    return parts.projects.concat(parts.collections);
+  }
+  function partHead(part) {
+    var h = el('button', 'label' + (folded[part] ? ' folded' : ''));
+    h.appendChild(el('span', 'fold', '▾')); h.appendChild(el('span', '', part === 'projects' ? 'Projects' : 'Collections'));
+    var how = sorts[part] || 'mine';
+    if (how !== 'mine') h.appendChild(el('span', 'how', SORTS.filter(function (x) { return x[0] === how; })[0][1]));
+    h.title = 'Click to fold or unfold; right click to order';
+    h.onclick = function () { folded[part] = !folded[part]; keep('board-folded', folded); side(); };
+    h.oncontextmenu = function (e) {
+      if (e.shiftKey) return;
+      e.preventDefault();
+      var box = $('ctx'); box.innerHTML = '';
+      box.appendChild(el('div', 'head', 'Order ' + (part === 'projects' ? 'projects' : 'collections')));
+      SORTS.forEach(function (x) {
+        var b = el('button', '', x[1]); if (x[0] === how) b.appendChild(el('span', 'k', '✓'));
+        b.onclick = function () { hide(); sorts[part] = x[0]; keep('board-sort', sorts); side(); if (x[0] === 'created' || x[0] === 'modified') getDates(); };
+        box.appendChild(b);
+      });
+      box.style.display = 'block';
+      var w = box.offsetWidth, hh = box.offsetHeight;
+      box.style.left = Math.min(e.clientX, innerWidth - w - 8) + 'px'; box.style.top = Math.min(e.clientY, innerHeight - hh - 8) + 'px';
+    };
+    return h;
+  }
+  function getDates() {
+    if (dating) return;
+    var now = Date.now(), want = data.projects.filter(function (p) { var x = dates[p.id]; return !x || !x.c || now - (x.at || 0) > 3600000; });
+    if (!want.length) return;
+    dating = true;
+    var one = function (p) {
+      var url = API + repo + '/commits?path=projects/' + encodeURIComponent(p.id) + '&per_page=1';
+      var day = function (j) { return j && j[0] && j[0].commit ? j[0].commit.committer.date : ''; };
+      return fetch(url, { headers: jhead, cache: 'no-store' }).then(function (r) {
+        if (!r.ok) throw new Error(r.status);
+        var last = ((r.headers.get('Link') || '').match(/[?&]page=(\d+)>; rel="last"/) || [])[1];
+        return r.json().then(function (j) {
+          var m = day(j), old = dates[p.id] && dates[p.id].c;
+          if (old || !last) return { c: old || m, m: m };
+          return fetch(url + '&page=' + last, { headers: jhead, cache: 'no-store' }).then(function (r2) { return r2.ok ? r2.json() : []; }).then(function (j2) { return { c: day(j2) || m, m: m }; });
+        });
+      }).then(function (x) { dates[p.id] = { c: x.c, m: x.m, at: now }; }, function () {});
+    };
+    var queue = want.slice(), run = function () { var p = queue.shift(); return p ? one(p).then(run) : null; };
+    Promise.all([run(), run(), run(), run()]).then(function () { dating = false; keep('board-dates', dates); side(); });
+  }
+  // a group renamed in the list (user, 2026-11-15: "double click on the list for the item would allow me to change the
+  // name"): its title in board.json and index.json, one commit, marked named, so a session keeps it as the user set it
+  function rename(a, p) {
+    var row = el('div', 'nav on'), inp = el('input'); inp.value = p.title;   // a field in a button takes no space key: a row of its own in its place
+    row.appendChild(inp); a.replaceWith(row); inp.focus(); inp.select();
+    var done = false, finish = function (save) {
+      if (done) return; done = true;
+      var t = inp.value.trim(), old = p.title;
+      if (!save || !t || t === old) return side();
+      p.title = t; side(); show();
+      did('rename ' + old, function () { setTitle(p.id, old, 'Rename ' + p.id + ' back (board)').then(function () { p.title = old; side(); show(); }, failed); });
+      setTitle(p.id, t, 'Rename ' + p.id + ' to ' + t + ' (board)').catch(function (e) { p.title = old; side(); show(); failed(e); });
+    };
+    inp.onkeydown = function (e) { e.stopPropagation(); if (e.key === 'Enter') finish(true); if (e.key === 'Escape') finish(false); };
+    inp.onblur = function () { finish(true); };
+    inp.onclick = function (e) { e.stopPropagation(); };
+  }
+  function setTitle(id, title, message) {
+    return commitData(['board.json', 'index.json'], function (t) {
+      var board = JSON.parse(t[0]), index = JSON.parse(t[1]), q = index.projects.filter(function (x) { return x.id === id; })[0];
+      if (!board.projects[id] || !q) return null;
+      board.projects[id].title = title; board.projects[id].named = true; q.title = title;
+      return { message: message, files: { 'board.json': JSON.stringify(board, null, 2) + '\n', 'index.json': JSON.stringify(index) } };
+    });
+  }
   function side() {
     var s = $('side'); s.innerHTML = '';
     function nav(id, label, n, mark) {
@@ -790,9 +886,17 @@ section.ph .hole { height: 90px; border-radius: 10px; display: flex; align-items
     nav('inspiration', 'Inspiration', count(function (it) { return it.project === 'inspiration'; }));
     var nDel = data.items.filter(binned).length;
     var dn = nav('deleted', 'Deleted', nDel); dn.style.display = nDel || state.view === 'deleted' || dragCodes ? '' : 'none'; dropOn(dn, 'delete');
-    data.projects.forEach(function (p, i) {
-      if (i === 0 || coll(p) !== coll(data.projects[i - 1])) s.appendChild(el('div', 'label', coll(p) ? 'Collections' : 'Projects'));
+    shownProjects().forEach(function (p, i, list) {
+      var part = coll(p) ? 'collections' : 'projects';
+      if (i === 0 || coll(p) !== coll(list[i - 1])) s.appendChild(partHead(part));
+      if (folded[part] && p.id !== state.view) return;   // a folded part shows only the group open now
       var a = nav(p.id, p.title, count(function (it) { return it.project === p.id; }));
+      var go1 = a.onclick;   // a second click within 400 ms renames: each click draws the list again, so the browser's dblclick never reaches one element
+      a.onclick = function (e) {
+        if (lastNav[0] === p.id && Date.now() - lastNav[1] < 400) { lastNav = [null, 0]; return rename(a, p); }
+        lastNav = [p.id, Date.now()]; go1.call(a, e);
+      };
+      a.title = 'Double-click to rename';
       a.draggable = true; a.dataset.id = p.id;
       a.ondragstart = function (e) { e.dataTransfer.setData('text/plain', p.id); e.dataTransfer.effectAllowed = 'move'; a.classList.add('drag'); };
       a.ondragend = function () { a.classList.remove('drag'); };
@@ -807,6 +911,7 @@ section.ph .hole { height: 90px; border-radius: 10px; display: flex; align-items
         e.preventDefault(); var id = e.dataTransfer.getData('text/plain'), low = a.classList.contains('drop-below');
         a.classList.remove('drop-above', 'drop-below');
         if (!id || id === p.id) return;
+        if (sorts[part] !== 'mine') return toast('Dragging sets My order: choose it first (right click on ' + (part === 'projects' ? 'Projects' : 'Collections') + ')');
         var i = data.projects.findIndex(function (x) { return x.id === p.id; });
         moveProject(id, low ? (data.projects[i + 1] && data.projects[i + 1].id === id ? (data.projects[i + 2] || {}).id || null : (data.projects[i + 1] || {}).id || null) : p.id);
       };
