@@ -714,9 +714,10 @@ section.ph .hole { height: 90px; border-radius: 10px; display: flex; align-items
       toast(J(ok) + ' copied to ' + p.title + ' as ' + J(news), 'Undo', function () { remove(news); });
     }, function (e) { drop(shown); refresh(); failed(e); });
   }
-  // the project list in the user's order (order.json, written by dragging); projects not in it keep their place at the end
+  // the project list in the user's order (order.json, written by dragging); a project not in it yet, a new one, first
+  // (user, 2026-11-15: "new project, simply find it on the top of a list")
   function sortProjects() {
-    var at = function (p) { var i = order.indexOf(p.id); return i < 0 ? 1e6 : i; };
+    var at = function (p) { var i = order.indexOf(p.id); return i < 0 ? -1 : i; };
     data.projects = data.projects.map(function (p, i) { return [p, i]; })
       .sort(function (a, b) { return coll(a[0]) - coll(b[0]) || at(a[0]) - at(b[0]) || a[1] - b[1]; }).map(function (x) { return x[0]; });
   }
