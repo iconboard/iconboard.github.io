@@ -62,6 +62,7 @@ a { color: inherit; }
 #side { width: 264px; flex: none; background: var(--side); border-right: 1px solid var(--line); display: flex; flex-direction: column; overflow-y: auto; padding: 14px 10px; }
 .brand { padding: 4px 10px 14px; font-size: 16px; font-weight: 500; color: var(--muted); }
 .label { display: flex; align-items: center; gap: 6px; width: 100%; padding: 14px 10px 6px; color: var(--muted); font-size: 13px; border: 0; background: none; text-align: left; cursor: pointer; }
+.grow { display: flex; align-items: center; gap: 10px; padding: 6px 0; }
 .label .fold { display: inline-block; width: 10px; font-size: 10px; transition: transform .12s; }
 .label.folded .fold { transform: rotate(-90deg); }
 .label .how { margin-left: auto; color: var(--faint); font-size: 12px; }
@@ -597,8 +598,33 @@ section.ph .hole { height: 90px; border-radius: 10px; display: flex; align-items
     toast(e.readOnly ? 'Not saved. GitHub says: ' + e.message + '. The token needs Contents: Read and write on the data repository.' : 'Not saved: ' + e.message, 'OK', function () {});
   }
   function refresh() { var y = $('main').scrollTop, z = $('side').scrollTop; fallback(); side(); show(y); $('side').scrollTop = z; }
-  function gone(it) { return !!trash[it.code]; }
-  function binned(it) { return gone(it) && trash[it.code] !== 'forever'; }   // what the Deleted view shows
+  function gone(it) { return !!trash[it.code] || !!trash['group:' + it.project]; }
+  function binned(it) { return !!trash[it.code] && trash[it.code] !== 'forever' && !trash['group:' + it.project]; }   // what the Deleted view shows (a deleted group's icons go with it)
+  function groupGone(p) { return !!trash['group:' + p.id]; }
+  function groupsBinned() { return data.projects.filter(function (p) { var t = trash['group:' + p.id]; return t && t !== 'forever'; }); }
+  // a whole project or collection deleted (user, 2026-11-15: "enable deleting whole projects too"; named in the menu by
+  // its part, Delete project or Delete collection): "group:<id>" in trash.json, hidden at once with its icons, restorable
+  // from Deleted for a day; the data repository's purge.py then removes its folder. Not one with an icon live on a site,
+  // nor one whose sets before-colours.json keeps
+  function deleteGroup(p) {
+    var kind = coll(p) ? 'collection' : 'project', live = data.items.some(function (it) { return it.project === p.id && st(it) === 'live'; });
+    if (live) return toast('Not deleted: an icon of ' + p.title + ' is live on a site. Take it off the site first.', 'OK', function () {});
+    if (keepSets.indexOf('"' + p.prefix + '-') >= 0) return toast('Not deleted: ' + p.title + ' holds sets of before-colours, the icons to go back to.', 'OK', function () {});
+    var key = 'group:' + p.id, at = new Date().toISOString();
+    trash[key] = at; refresh();
+    did('delete ' + kind + ' ' + p.title, function () { restoreGroup(p); });
+    writeTrash(function (t) { t[key] = at; }, 'Delete ' + kind + ' ' + p.id + ' (board)').then(function () {
+      toast('Deleted ' + kind + ' ' + p.title, 'Undo', function () { restoreGroup(p); });
+    }, function (e) { delete trash[key]; refresh(); failed(e); });
+  }
+  function restoreGroup(p, forever_) {
+    var key = 'group:' + p.id, was = trash[key];
+    if (forever_) { trash[key] = 'forever'; undos = []; } else delete trash[key];
+    refresh();
+    writeTrash(function (t) { if (forever_) t[key] = 'forever'; else delete t[key]; }, (forever_ ? 'Delete forever ' : 'Restore ') + p.id + ' (board)').then(function () {
+      toast((forever_ ? 'Deleted forever ' : 'Restored ') + p.title);
+    }, function (e) { trash[key] = was; refresh(); failed(e); });
+  }
   // Moves to Top, Keep or Waiting (right-click menu, keys T K W, dragging; user 2026-11-07): the page writes them into
   // board.json and index.json itself, one commit, final at once (user: "do as you proposed"). board.json keeps per
   // project "top" (sets and proposals) and "kept" (proposals only: a set is kept unless top). A proposal stays one SVG
@@ -768,7 +794,7 @@ section.ph .hole { height: 90px; border-radius: 10px; display: flex; align-items
     var at = ref ? '?ref=' + ref : '';
     return Promise.all([fetch(API + repo + '/contents/index.json' + at, { headers: head, cache: 'no-store' }).then(function (r) {
       refused(r); if (!r.ok) throw new Error('index.json: ' + r.status); return r.json();
-    }), readTrash(ref), readJson('order.json', [], ref).then(function (o) { order = o; }), readJson('places.json', {}, ref).then(function (q) { places = q; }), readJson('favourites.json', [], ref).then(function (f) { favs = f; }), readJson('test.json', [], ref).then(function (t) { tests = t; })]).then(function (res) {
+    }), readTrash(ref), readJson('order.json', [], ref).then(function (o) { order = o; }), readJson('places.json', {}, ref).then(function (q) { places = q; }), readJson('favourites.json', [], ref).then(function (f) { favs = f; }), readJson('test.json', [], ref).then(function (t) { tests = t; }), readJson('before-colours.json', {}, ref).then(function (b) { keepSets = JSON.stringify(b); })]).then(function (res) {
       data = res[0]; byCode = {}; sortProjects(); data.items.forEach(function (it) { byCode[it.code.toUpperCase()] = it; });
       picked = picked.filter(function (c) { return byCode[c.toUpperCase()]; });
       loaded = Date.now();
@@ -812,7 +838,7 @@ section.ph .hole { height: 90px; border-radius: 10px; display: flex; align-items
   var folded = stored('board-folded', {}), sorts = stored('board-sort', { projects: 'mine', collections: 'mine' }), dates = stored('board-dates', {}), dating = false;
   function shownProjects() {
     var parts = { projects: [], collections: [] };
-    data.projects.forEach(function (p) { parts[coll(p) ? 'collections' : 'projects'].push(p); });
+    data.projects.forEach(function (p) { if (!groupGone(p)) parts[coll(p) ? 'collections' : 'projects'].push(p); });
     Object.keys(parts).forEach(function (k) {
       var how = sorts[k], d = function (p, f) { return (dates[p.id] || {})[f] || ''; };
       if (how === 'alpha') parts[k].sort(function (a, b) { return a.title.localeCompare(b.title, undefined, { sensitivity: 'base' }); });
@@ -842,9 +868,7 @@ section.ph .hole { height: 90px; border-radius: 10px; display: flex; align-items
         b.onclick = function () { hide(); sorts[part] = x[0]; keep('board-sort', sorts); side(); if (x[0] === 'created' || x[0] === 'modified') getDates(); };
         box.appendChild(b);
       });
-      box.style.display = 'block';
-      var w = box.offsetWidth, hh = box.offsetHeight;
-      box.style.left = Math.min(e.clientX, innerWidth - w - 8) + 'px'; box.style.top = Math.min(e.clientY, innerHeight - hh - 8) + 'px';
+      popAt(box, e);
     };
     return h;
   }
@@ -872,7 +896,7 @@ section.ph .hole { height: 90px; border-radius: 10px; display: flex; align-items
   // a group renamed in the list (user, 2026-11-15: "double click on the list for the item would allow me to change the
   // name"): its title in board.json and index.json, one commit, marked named, so a session keeps it as the user set it
   document.addEventListener('mousedown', function (e) { if (renaming && e.target !== renaming.input) renaming.finish(true); }, true);   // a press elsewhere keeps the name first
-  var renaming = null;   // { id, value } while a name is typed: the list drawn again keeps the field, the poll waits
+  var renaming = null, keepSets = '';   // { id, value } while a name is typed: the list drawn again keeps the field, the poll waits
   function rename(a, p, value) {
     var row = el('div', 'nav on'), inp = el('input');   // a field in a button takes no space key: a row of its own in its place
     inp.value = value != null ? value : p.title; renaming = { id: p.id, value: inp.value };
@@ -917,7 +941,7 @@ section.ph .hole { height: 90px; border-radius: 10px; display: flex; align-items
     dropOn(nav('test', 'Test', count(isTest)), 'test');
     dropOn(nav('top', 'Top', count(function (it) { return st(it) === 'top' || st(it) === 'live'; })), 'top');
     nav('inspiration', 'Inspiration', count(function (it) { return it.project === 'inspiration'; }));
-    var nDel = data.items.filter(binned).length;
+    var nDel = data.items.filter(binned).length + groupsBinned().length;
     var dn = nav('deleted', 'Deleted', nDel); dn.style.display = nDel || state.view === 'deleted' || dragCodes ? '' : 'none'; dropOn(dn, 'delete');
     shownProjects().forEach(function (p, i, list) {
       var part = coll(p) ? 'collections' : 'projects';
@@ -930,6 +954,15 @@ section.ph .hole { height: 90px; border-radius: 10px; display: flex; align-items
         lastNav = [p.id, Date.now()]; go1.call(a, e);
       };
       a.title = 'Double-click to rename';
+      a.oncontextmenu = function (e) {
+        if (e.shiftKey) return;
+        e.preventDefault();
+        var box = $('ctx'); box.innerHTML = ''; box.appendChild(el('div', 'head', p.title));
+        [['Rename', function () { rename(a, p); }], ['Delete ' + (coll(p) ? 'collection' : 'project'), function () { deleteGroup(p); }]].forEach(function (x) {
+          var b = el('button', '', x[0]); b.onclick = function () { hide(); x[1](); }; box.appendChild(b);
+        });
+        popAt(box, e);
+      };
       if (renaming && renaming.id === p.id) rename(a, p, renaming.value);   // a name being typed survives the list drawn again (the old field's blur is ignored)
       a.draggable = true; a.dataset.id = p.id;
       a.ondragstart = function (e) { e.dataTransfer.setData('text/plain', p.id); e.dataTransfer.effectAllowed = 'move'; a.classList.add('drag'); };
@@ -969,7 +1002,7 @@ section.ph .hole { height: 90px; border-radius: 10px; display: flex; align-items
   // the list as it is ordered now, so no group name is fixed in the code (user, 2026-11-07)
   function fallback() {
     var fixed = ['favourite', 'test', 'live', 'top', 'inspiration', 'deleted'];
-    if (fixed.indexOf(state.view) >= 0 || data.projects.some(function (p) { return p.id === state.view; })) return;
+    if (fixed.indexOf(state.view) >= 0 || data.projects.some(function (p) { return p.id === state.view && !groupGone(p); })) return;
     var first = listed()[0]; state.view = first ? first.id : 'live'; state.status = 'all'; setHash();
   }
   function show(y) {
@@ -986,7 +1019,17 @@ section.ph .hole { height: 90px; border-radius: 10px; display: flex; align-items
     });
     var items = state.status === 'all' ? all : all.filter(function (it) { return st(it) === state.status; });
     var box = el('div'); box.id = 'content'; waits = [];
-    if (!items.length) { box.appendChild(el('p', 'empty', 'Nothing here.')); waits = null; return swap(box, 0); }
+    var gb = v === 'deleted' ? groupsBinned() : [];
+    if (gb.length) {   // deleted projects and collections, each with Restore and Delete forever
+      var gs = box.appendChild(el('section'));
+      var gh = el('h2', '', 'Deleted projects and collections'); gh.appendChild(el('span', 'sub', 'restorable for a day; Delete forever removes them now')); gs.appendChild(gh);
+      gb.forEach(function (p) {
+        var row = gs.appendChild(el('div', 'grow')), n = data.items.filter(function (it) { return it.project === p.id; }).length;
+        row.appendChild(el('span', '', p.title + ' \u00b7 ' + (coll(p) ? 'collection' : 'project') + ' \u00b7 ' + n + ' icons'));
+        [['Restore', false], ['Delete forever', true]].forEach(function (x) { var b = el('button', 'chip', x[0]); b.onclick = function () { restoreGroup(p, x[1]); }; row.appendChild(b); });
+      });
+    }
+    if (!items.length) { if (!gb.length) box.appendChild(el('p', 'empty', 'Nothing here.')); waits = null; return swap(box, 0); }
     var groups = [];
     function group(title, sub, list, keep) { if (list.length || keep) groups.push([title, sub, list]); }   // keep: an empty group to drop into
     var desc = function (a, b) { return num(b) - num(a); };
@@ -1137,6 +1180,7 @@ section.ph .hole { height: 90px; border-radius: 10px; display: flex; align-items
     box.style.left = Math.min(e.clientX, innerWidth - w - 8) + 'px'; box.style.top = Math.min(e.clientY, innerHeight - h - 8) + 'px';
   }
   function hide() { $('ctx').style.display = 'none'; }
+  function popAt(box, e) { box.style.display = 'block'; var w = box.offsetWidth, h = box.offsetHeight; box.style.left = Math.min(e.clientX, innerWidth - w - 8) + 'px'; box.style.top = Math.min(e.clientY, innerHeight - h - 8) + 'px'; }
   document.addEventListener('click', function (e) { if (!$('ctx').contains(e.target)) hide(); });
   window.addEventListener('blur', hide); $('main').addEventListener('wheel', hide, { passive: true });
   function copyImage(it) {   // as a 512 px PNG, which every app can paste
