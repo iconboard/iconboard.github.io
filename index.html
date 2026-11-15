@@ -1388,6 +1388,8 @@ section.ph .hole { height: 90px; border-radius: 10px; display: flex; align-items
   function readHash() {
     var last = null; if (!location.hash.slice(1)) { try { last = localStorage.getItem('board-view'); } catch (e) {} }
     var h = (last !== null ? last : decodeURIComponent(location.hash.slice(1))).split('/');
+    var renamed = { 'pathway-lab': 'pathway-forge' };   // a group whose folder was renamed keeps its old address (2026-11-15)
+    if (renamed[h[0]]) h[0] = renamed[h[0]];
     var views = ['live', 'favourite', 'test', 'top', 'inspiration', 'deleted'].concat(data.projects.map(function (p) { return p.id; }));
     if (views.indexOf(h[0]) >= 0) state.view = h[0];
     if (STATUS.some(function (s) { return s[0] === h[1]; })) state.status = h[1];
