@@ -65,7 +65,7 @@ a { color: inherit; }
 .label .fold { display: inline-block; width: 10px; font-size: 10px; transition: transform .12s; }
 .label.folded .fold { transform: rotate(-90deg); }
 .label .how { margin-left: auto; color: var(--faint); font-size: 12px; }
-.nav input { flex: 1; min-width: 0; font: inherit; color: var(--text); background: var(--bg, #fff); border: 1px solid #999; border-radius: 6px; padding: 1px 6px; }
+.nav input { flex: 1; min-width: 0; font: inherit; color: var(--text); background: var(--bg); border: 1px solid #999; border-radius: 6px; padding: 1px 6px; }
 .nav { display: flex; align-items: center; gap: 10px; width: 100%; padding: 6px 10px; color: var(--nav); border: 0; border-radius: 10px; background: none; text-align: left; cursor: pointer; }
 .nav:hover { background: var(--hover); }
 .nav.on { background: var(--on); color: var(--text); }
@@ -784,17 +784,17 @@ section.ph .hole { height: 90px; border-radius: 10px; display: flex; align-items
   // writes, which show their result already.
   var lastCommit = null, commitsSeen = {};
   setInterval(function () {
-    if (document.visibilityState !== 'visible' || !data || dragCodes || writing) return;
+    if (document.visibilityState !== 'visible' || !data || dragCodes || writing || renaming) return;
     fetch(API + repo + '/commits/main', { headers: { Authorization: 'Bearer ' + token, Accept: 'application/vnd.github.sha' }, cache: 'no-store' })
       .then(function (r) { return r.ok ? r.text() : null; }).then(function (sha) {
         sha = (sha || '').trim(); if (!sha || commitsSeen[sha]) return;   // a commit seen before is an older answer: no step back
         commitsSeen[sha] = 1; var was = lastCommit; lastCommit = sha;
-        if (was && !dragCodes && !writing) return load(sha).then(function () { refresh(); prefetch(); });
+        if (was && !dragCodes && !writing) return load(sha).then(function () { refresh(); prefetch(); datesIfWanted(); });
       }).catch(function () {});
   }, 15000);
   load().then(function () {
     $('login').style.display = 'none'; $('app').style.display = 'flex';
-    readHash(); fallback(); setHash(); side(); show(); setTimeout(prefetch, 0);
+    readHash(); fallback(); setHash(); side(); show(); setTimeout(prefetch, 0); datesIfWanted();
   }).catch(function (e) { if (e.message !== 'refused') { $('content').innerHTML = '<p class="empty">Could not load the board: ' + e.message + '</p>'; $('app').style.display = 'flex'; } });
 
   function el(tag, cls, text) { var e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; }
@@ -814,19 +814,21 @@ section.ph .hole { height: 90px; border-radius: 10px; display: flex; align-items
     var parts = { projects: [], collections: [] };
     data.projects.forEach(function (p) { parts[coll(p) ? 'collections' : 'projects'].push(p); });
     Object.keys(parts).forEach(function (k) {
-      var how = sorts[k] || 'mine', d = function (p, f) { return (dates[p.id] || {})[f] || ''; };
+      var how = sorts[k], d = function (p, f) { return (dates[p.id] || {})[f] || ''; };
       if (how === 'alpha') parts[k].sort(function (a, b) { return a.title.localeCompare(b.title, undefined, { sensitivity: 'base' }); });
       else if (how === 'created' || how === 'modified') {
-        var f = how === 'created' ? 'c' : 'm';   // newest first; a group with no date yet at the end
-        parts[k].sort(function (a, b) { return d(a, f) === d(b, f) ? 0 : !d(a, f) ? 1 : !d(b, f) ? -1 : d(a, f) < d(b, f) ? 1 : -1; });
+        var f = how === 'created' ? 'c' : 'm';
+        parts[k].sort(function (a, b) { return d(a, f) === d(b, f) ? 0 : !d(a, f) ? -1 : !d(b, f) ? 1 : d(a, f) < d(b, f) ? 1 : -1; });   // newest first; a group with no date yet (a new one) first
       }
     });
     return parts.projects.concat(parts.collections);
   }
+  function listed() { return shownProjects().filter(function (p) { return !folded[coll(p) ? 'collections' : 'projects'] || p.id === state.view; }); }
+  function datesIfWanted() { if (/created|modified/.test(sorts.projects + ' ' + sorts.collections)) getDates(); }
   function partHead(part) {
     var h = el('button', 'label' + (folded[part] ? ' folded' : ''));
     h.appendChild(el('span', 'fold', '▾')); h.appendChild(el('span', '', part === 'projects' ? 'Projects' : 'Collections'));
-    var how = sorts[part] || 'mine';
+    var how = (SORTS.filter(function (x) { return x[0] === sorts[part]; })[0] || SORTS[0])[0];
     if (how !== 'mine') h.appendChild(el('span', 'how', SORTS.filter(function (x) { return x[0] === how; })[0][1]));
     h.title = 'Click to fold or unfold; right click to order';
     h.onclick = function () { folded[part] = !folded[part]; keep('board-folded', folded); side(); };
@@ -860,7 +862,7 @@ section.ph .hole { height: 90px; border-radius: 10px; display: flex; align-items
         return r.json().then(function (j) {
           var m = day(j), old = dates[p.id] && dates[p.id].c;
           if (old || !last) return { c: old || m, m: m };
-          return fetch(url + '&page=' + last, { headers: jhead, cache: 'no-store' }).then(function (r2) { return r2.ok ? r2.json() : []; }).then(function (j2) { return { c: day(j2) || m, m: m }; });
+          return fetch(url + '&page=' + last, { headers: jhead, cache: 'no-store' }).then(function (r2) { return r2.ok ? r2.json() : []; }).then(function (j2) { return { c: day(j2), m: m }; });   // none on a failure: asked again next time
         });
       }).then(function (x) { dates[p.id] = { c: x.c, m: x.m, at: now }; }, function () {});
     };
@@ -869,27 +871,35 @@ section.ph .hole { height: 90px; border-radius: 10px; display: flex; align-items
   }
   // a group renamed in the list (user, 2026-11-15: "double click on the list for the item would allow me to change the
   // name"): its title in board.json and index.json, one commit, marked named, so a session keeps it as the user set it
-  function rename(a, p) {
-    var row = el('div', 'nav on'), inp = el('input'); inp.value = p.title;   // a field in a button takes no space key: a row of its own in its place
-    row.appendChild(inp); a.replaceWith(row); inp.focus(); inp.select();
+  document.addEventListener('mousedown', function (e) { if (renaming && e.target !== renaming.input) renaming.finish(true); }, true);   // a press elsewhere keeps the name first
+  var renaming = null;   // { id, value } while a name is typed: the list drawn again keeps the field, the poll waits
+  function rename(a, p, value) {
+    var row = el('div', 'nav on'), inp = el('input');   // a field in a button takes no space key: a row of its own in its place
+    inp.value = value != null ? value : p.title; renaming = { id: p.id, value: inp.value };
+    row.appendChild(inp); a.replaceWith(row); inp.focus();
+    if (value != null) inp.setSelectionRange(inp.value.length, inp.value.length); else inp.select();
     var done = false, finish = function (save) {
-      if (done) return; done = true;
-      var t = inp.value.trim(), old = p.title;
+      if (done) return; done = true; renaming = null;
+      var t = inp.value.trim(), q = function () { return data.projects.filter(function (x) { return x.id === p.id; })[0]; }, old = (q() || p).title;
+      var put = function (x) { var g = q(); if (g) g.title = x; side(); show(); };
       if (!save || !t || t === old) return side();
-      p.title = t; side(); show();
-      did('rename ' + old, function () { setTitle(p.id, old, 'Rename ' + p.id + ' back (board)').then(function () { p.title = old; side(); show(); }, failed); });
-      setTitle(p.id, t, 'Rename ' + p.id + ' to ' + t + ' (board)').catch(function (e) { p.title = old; side(); show(); failed(e); });
+      put(t);
+      setTitle(p.id, t, 'Rename ' + p.id + ' to ' + t + ' (board)').then(function () {
+        did('rename ' + old, function () { put(old); setTitle(p.id, old, 'Rename ' + p.id + ' back (board)').catch(function (e) { put(t); failed(e); }); });
+      }, function (e) { put(old); failed(e); });
     };
+    renaming.input = inp; renaming.finish = finish;
+    inp.oninput = function () { if (renaming) renaming.value = inp.value; };
     inp.onkeydown = function (e) { e.stopPropagation(); if (e.key === 'Enter') finish(true); if (e.key === 'Escape') finish(false); };
-    inp.onblur = function () { finish(true); };
+    inp.onblur = function () { setTimeout(function () { if (inp.isConnected && document.hasFocus()) finish(true); }, 0); };   // not when the list is drawn again (the field is gone a moment later) or the window left
     inp.onclick = function (e) { e.stopPropagation(); };
   }
   function setTitle(id, title, message) {
     return commitData(['board.json', 'index.json'], function (t) {
       var board = JSON.parse(t[0]), index = JSON.parse(t[1]), q = index.projects.filter(function (x) { return x.id === id; })[0];
-      if (!board.projects[id] || !q) return null;
+      if (!board.projects[id] || !q) throw new Error('group ' + id + ' not found');
       board.projects[id].title = title; board.projects[id].named = true; q.title = title;
-      return { message: message, files: { 'board.json': JSON.stringify(board, null, 2) + '\n', 'index.json': JSON.stringify(index) } };
+      return { message: message, result: true, files: { 'board.json': JSON.stringify(board, null, 2) + '\n', 'index.json': JSON.stringify(index) } };
     });
   }
   function side() {
@@ -920,6 +930,7 @@ section.ph .hole { height: 90px; border-radius: 10px; display: flex; align-items
         lastNav = [p.id, Date.now()]; go1.call(a, e);
       };
       a.title = 'Double-click to rename';
+      if (renaming && renaming.id === p.id) rename(a, p, renaming.value);   // a name being typed survives the list drawn again (the old field's blur is ignored)
       a.draggable = true; a.dataset.id = p.id;
       a.ondragstart = function (e) { e.dataTransfer.setData('text/plain', p.id); e.dataTransfer.effectAllowed = 'move'; a.classList.add('drag'); };
       a.ondragend = function () { a.classList.remove('drag'); };
@@ -959,7 +970,7 @@ section.ph .hole { height: 90px; border-radius: 10px; display: flex; align-items
   function fallback() {
     var fixed = ['favourite', 'test', 'live', 'top', 'inspiration', 'deleted'];
     if (fixed.indexOf(state.view) >= 0 || data.projects.some(function (p) { return p.id === state.view; })) return;
-    state.view = data.projects.length ? data.projects[0].id : 'live'; state.status = 'all'; setHash();
+    var first = listed()[0]; state.view = first ? first.id : 'live'; state.status = 'all'; setHash();
   }
   function show(y) {
     fallback();
@@ -1290,10 +1301,10 @@ section.ph .hole { height: 90px; border-radius: 10px; display: flex; align-items
       return;
     }
     if (!open_ && (e.key === 'ArrowDown' || e.key === 'ArrowUp')) {
-      var views = ['live', 'favourite', 'test', 'top', 'inspiration'].concat(data.items.some(binned) ? ['deleted'] : [], data.projects.map(function (p) { return p.id; }));
+      var views = ['live', 'favourite', 'test', 'top', 'inspiration'].concat(data.items.some(binned) ? ['deleted'] : [], listed().map(function (p) { return p.id; }));   // as the list shows them (order, folding)
       var j = views.indexOf(state.view) + (e.key === 'ArrowDown' ? 1 : -1);
       if (j < 0 || j >= views.length) return;
-      e.preventDefault(); state.view = views[j]; state.status = 'all'; go();
+      e.preventDefault(); state.view = views[j]; state.status = 'all'; lastNav = [null, 0]; go();
       var on = document.querySelector('.nav.on'); if (on) on.scrollIntoView({ block: 'nearest' });
     }
   });
