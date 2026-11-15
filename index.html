@@ -355,7 +355,10 @@ section.ph .hole { height: 90px; border-radius: 10px; display: flex; align-items
   // writes and the shas it wrote, in order. A finished change is applied again only to a read of a version before its
   // own write; any other version (its own, or one written by someone else since) drops it. Changes still being written
   // are shown, but never saved by another write.
-  var pending = {}, hist = {}, wrote = {};
+  // Writes to one file go one after another (user, 2026-11-15, second report: deletes a second apart came back): run
+  // together, they built on the same version, GitHub refused all but one as a conflict and the board gave the icons
+  // back. A write builds on what this page last wrote (kept in mine[path]) while GitHub still serves an older version.
+  var pending = {}, hist = {}, wrote = {}, mine = {}, writes = {};
   function note(path, sha) { var h = hist[path] = hist[path] || []; if (sha && h[h.length - 1] !== sha) { h.push(sha); if (h.length > 50) h.shift(); } }
   function older(path, a, b) { var h = hist[path] || [], i = h.indexOf(a); return i >= 0 && i < h.lastIndexOf(b); }
   function overlay(path, obj, sha, write) {   // write: for a PUT, so changes of other writes under way are left out
@@ -368,36 +371,62 @@ section.ph .hole { height: 90px; border-radius: 10px; display: flex; align-items
     return obj;
   }
   function readRaw(path, empty, ref) {   // ref: a commit, so a reload reads the file exactly as it was in it
-    return fetch(API + repo + '/contents/' + path + (ref ? '?ref=' + ref : ''), { headers: jhead, cache: 'no-store' }).then(function (r) {
+    return fetch(API + repo + '/contents/' + path + (ref ? '?ref=' + ref : ''), { headers: jhead, cache: 'no-store', signal: limit() }).then(function (r) {
       if (r.status === 404) return { sha: null, content: '' };
       refused(r); if (!r.ok) throw new Error(path + ': ' + r.status); return r.json();
     }).then(function (j) {
       return { sha: j.sha, obj: j.content ? JSON.parse(decodeURIComponent(escape(atob(j.content.replace(/\n/g, ''))))) : empty };
     });
   }
-  function readJson(path, empty, ref) { return readRaw(path, empty, ref).then(function (x) { return overlay(path, x.obj, x.sha); }); }
-  function writeJson(path, empty, change, message) {   // re-read, change, write; a second try if someone wrote in between
-    var mine = { change: change }; (pending[path] = pending[path] || []).push(mine);
-    var go = function (again) {
-      var base;
-      return readRaw(path, empty).then(function (x) {
-        // a read older than this page's last write is that write's file as far as it goes: write on top of that version
-        base = wrote[path] && older(path, x.sha, wrote[path]) ? wrote[path] : x.sha;
-        var obj = overlay(path, x.obj, x.sha, true); obj = change(obj) || obj;
-        var body = { message: message, content: btoa(unescape(encodeURIComponent(JSON.stringify(obj, null, 1) + '\n'))) };
+  // a call GitHub never answers gives up after 20 s, so one lost reply cannot hold back the saves waiting behind it
+  function limit() { return window.AbortSignal && AbortSignal.timeout ? AbortSignal.timeout(20000) : undefined; }
+  function busy() { return writing || Object.keys(writes).some(function (k) { return writes[k].busy; }); }
+  function writeJson(path, empty, change, message) {   // resolves once the change is on GitHub
+    var me = { change: change, message: message }; (pending[path] = pending[path] || []).push(me);
+    var q = writes[path] = writes[path] || { waiting: [], busy: false };
+    var p = new Promise(function (ok, no) { me.ok = ok; me.no = no; });
+    q.waiting.push(me); flush(path, empty);
+    return p;
+  }
+  function flush(path, empty) {   // changes that waited while a write was under way go out together, in one commit
+    var q = writes[path]; if (q.busy || !q.waiting.length) return;
+    var group = q.waiting.splice(0); q.busy = true;
+    var message = group.length === 1 ? group[0].message : group.map(function (m) { return m.message.replace(/ \(board\)$/, ''); }).join('; ') + ' (board)';
+    var go = function (again) {   // re-read, change, write; a second try if someone wrote in between
+      var base, text;
+      // the second try reads the file at the newest commit: a read without one may still return the version refused
+      var read = again ? api('/git/ref/heads/main').then(function (r) { return readRaw(path, empty, r.object.sha); }) : readRaw(path, empty);
+      return read.then(function (x) {
+        var obj;
+        if (wrote[path] && (x.sha === wrote[path] || older(path, x.sha, wrote[path]))) {   // GitHub not caught up: our own last version
+          base = wrote[path]; obj = JSON.parse(mine[path]);
+        } else { base = x.sha; obj = overlay(path, x.obj, x.sha, true); }   // someone else wrote since: theirs (overlay only clears our older changes)
+        group.forEach(function (m) { obj = m.change(obj) || obj; });
+        text = JSON.stringify(obj, null, 1);
+        var body = { message: message, content: btoa(unescape(encodeURIComponent(text + '\n'))) };
         if (base) body.sha = base;
-        return fetch(API + repo + '/contents/' + path, { method: 'PUT', headers: jhead, body: JSON.stringify(body) });
+        return fetch(API + repo + '/contents/' + path, { method: 'PUT', headers: jhead, body: JSON.stringify(body), signal: limit() });
       }).then(function (r) {
         if (r.status === 409 && !again) return go(true);
         if (!r.ok) return r.json().catch(function () { return {}; }).then(function (j) {
           var e = new Error((j.message || 'error') + ' (' + r.status + ')'); e.readOnly = r.status === 403 || r.status === 404; throw e;
         });
-        return r.json().then(function (j) { note(path, base); note(path, j.content.sha); wrote[path] = mine.sha = j.content.sha; mine.done = Date.now(); });
+        return r.json().then(function (j) {
+          note(path, base); note(path, j.content.sha); wrote[path] = j.content.sha; mine[path] = text;
+          var now = Date.now(); group.forEach(function (m) { m.sha = j.content.sha; m.done = now; m.ok(); });
+        });
       });
     };
-    return go(false).catch(function (e) { pending[path] = (pending[path] || []).filter(function (p) { return p !== mine; }); throw e; });
+    go(false).catch(function (e) {
+      pending[path] = (pending[path] || []).filter(function (p) { return group.indexOf(p) < 0; });
+      group.forEach(function (m) { m.no(e); });
+    }).then(function () { q.busy = false; flush(path, empty); });
   }
-  function readTrash(ref) { return readJson('trash.json', {}, ref).then(function (t) { trash = t; }); }
+  // closing the tab while a change is still being saved would lose it: the browser asks first
+  window.addEventListener('beforeunload', function (e) {
+    if (!busy()) return;
+    e.preventDefault(); e.returnValue = '';
+  });
   function writeTrash(change, message) { return writeJson('trash.json', {}, function (t) { change(t); }, message); }
   // Cmd+Z / Ctrl+Z (user, 2026-11-07): takes back the last change on the board, step by step: delete, restore, moves to
   // Top, Keep or Waiting, the order in Top and Keep, the project list. Delete forever cannot be taken back.
@@ -432,7 +461,7 @@ section.ph .hole { height: 90px; border-radius: 10px; display: flex; align-items
     refresh();
     writeTrash(function (t) { codes.forEach(function (c) { t[c] = at; }); }, 'Delete ' + codes.join(', ') + ' (board)').then(function () {
       if (undo !== false) toast('Deleted ' + J(codes), 'Undo', function () { restore(codes); });
-    }, function (e) { codes.forEach(function (c) { delete trash[c]; }); refresh(); failed(e); });
+    }, function (e) { codes.forEach(function (c) { if (trash[c] === at) delete trash[c]; }); refresh(); failed(e); });   // unless changed again since
   }
   function restore(codes) {
     if (picked.length) $('clear').onclick();
@@ -441,7 +470,7 @@ section.ph .hole { height: 90px; border-radius: 10px; display: flex; align-items
     refresh();
     writeTrash(function (t) { codes.forEach(function (c) { delete t[c]; }); }, 'Restore ' + codes.join(', ') + ' (board)').then(function () {
       toast('Restored ' + J(codes));
-    }, function (e) { codes.forEach(function (c) { trash[c] = was[c]; }); refresh(); failed(e); });
+    }, function (e) { codes.forEach(function (c) { if (!trash[c]) trash[c] = was[c]; }); refresh(); failed(e); });
   }
   // dragging icons (user, 2026-11-07): the picked icons, or the one under the pointer, go to the group they are
   // dropped on (Top, Keep, Waiting, as the keys T, K, W; any Waiting batch means Waiting, in the icon's own batch),
@@ -793,11 +822,17 @@ section.ph .hole { height: 90px; border-radius: 10px; display: flex; align-items
   // everything the board reads; called at the start and when the tab is shown again after a minute
   // (user, 2026-11-07: a tab left open showed old icons)
   var loaded = 0;
+  // The board's own changes are laid over what a reload read only when the whole reload has arrived (user, 2026-11-15,
+  // second report): laid over each file as it came, a delete made while the reload was still reading was lost from the
+  // screen until the next reload.
+  var JSONS = [['trash.json', {}, function (v) { trash = v; }], ['order.json', [], function (v) { order = v; }], ['places.json', {}, function (v) { places = v; }],
+               ['favourites.json', [], function (v) { favs = v; }], ['test.json', [], function (v) { tests = v; }], ['before-colours.json', {}, function (v) { keepSets = JSON.stringify(v); }]];
   function load(ref) {   // ref: the commit the 15 s check saw, so every file is read as it is in that commit
     var at = ref ? '?ref=' + ref : '';
     return Promise.all([fetch(API + repo + '/contents/index.json' + at, { headers: head, cache: 'no-store' }).then(function (r) {
       refused(r); if (!r.ok) throw new Error('index.json: ' + r.status); return r.json();
-    }), readTrash(ref), readJson('order.json', [], ref).then(function (o) { order = o; }), readJson('places.json', {}, ref).then(function (q) { places = q; }), readJson('favourites.json', [], ref).then(function (f) { favs = f; }), readJson('test.json', [], ref).then(function (t) { tests = t; }), readJson('before-colours.json', {}, ref).then(function (b) { keepSets = JSON.stringify(b); })]).then(function (res) {
+    })].concat(JSONS.map(function (f) { return readRaw(f[0], f[1], ref); }))).then(function (res) {
+      JSONS.forEach(function (f, i) { f[2](overlay(f[0], res[i + 1].obj, res[i + 1].sha)); });
       data = res[0]; byCode = {}; sortProjects(); data.items.forEach(function (it) { byCode[it.code.toUpperCase()] = it; });
       picked = picked.filter(function (c) { return byCode[c.toUpperCase()]; });
       loaded = Date.now();
