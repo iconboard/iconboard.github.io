@@ -484,9 +484,10 @@ section.ph .hole { height: 90px; border-radius: 10px; display: flex; align-items
     return list.slice().sort(function (a, b) { var i = pos(a), j = pos(b); return (i < 0 && j < 0) ? 0 : i < 0 ? 1 : j < 0 ? -1 : i - j; });
   }
   function slot(sec, x, y) {   // the card the drop goes in front of (null: at the end), skipping the dragged ones;
-    // only a drop among the icons places them there: on the heading or in empty space they go to the end (user)
+    // a drop among the icons places them there; on the heading they go first (user, 2026-11-18: what was chosen last
+    // is looked at first), in empty space after the icons to the end
     var cards = [].slice.call(sec.querySelectorAll('.card')).filter(function (c) { return dragCodes.indexOf(c.dataset.code) < 0; });
-    if (cards.length && y < cards[0].getBoundingClientRect().top) return { card: null, cards: cards };
+    if (cards.length && y < cards[0].getBoundingClientRect().top) return { card: cards[0], cards: cards };
     for (var i = 0; i < cards.length; i++) {
       var r = cards[i].getBoundingClientRect();
       if (y < r.top || (y <= r.bottom && x < r.left + r.width / 2)) return { card: cards[i], cards: cards };
@@ -544,7 +545,7 @@ section.ph .hole { height: 90px; border-radius: 10px; display: flex; align-items
       if (ok.length && !moved.length) { if (spot) refresh(); return; }   // only the place changed, or nothing
       ok = moved;
       if (!ok.length) return toast(to === 'waiting' ? 'Only proposals can wait; live icons stay live' : 'Only icons that are not live can move');
-      mark(ok, to);
+      mark(ok, to, !!spot);
     });
     return node;
   }
@@ -680,14 +681,33 @@ section.ph .hole { height: 90px; border-radius: 10px; display: flex; align-items
       return { message: message, files: { 'board.json': JSON.stringify(board, null, 2) + '\n', 'index.json': JSON.stringify(index) } };
     });
   }
-  function mark(codes, to) {
+  // A move to Top or Keep puts the icons first there (user, 2026-11-18: "if it was chosen recent, probably this is what
+  // I'm going to look at in the first place"): their codes at the start of places.json for that group, unless a drop
+  // among the icons placed them (placed).
+  function first(codes, to) {   // gives the keys' earlier lists, to put back on undo
+    var keys = {}, was = {};
+    codes.forEach(function (c) { var it = byCode[c.toUpperCase()]; (keys[it.project + '/' + to] = keys[it.project + '/' + to] || []).push(it.code); });
+    Object.keys(keys).forEach(function (k) {
+      var mine = keys[k]; was[k] = places[k];
+      places[k] = mine.concat((places[k] || []).filter(function (c) { return mine.indexOf(c) < 0; }));
+      writeJson('places.json', {}, function (q) { q[k] = mine.concat((q[k] || []).filter(function (c) { return mine.indexOf(c) < 0; })); }, 'Order ' + k + ': ' + mine.join(', ') + ' first (board)').catch(failed);
+    });
+    return was;
+  }
+  function unfirst(was) {
+    Object.keys(was).forEach(function (k) {
+      if (was[k]) places[k] = was[k]; else delete places[k];
+      writeJson('places.json', {}, function (q) { if (was[k]) q[k] = was[k]; else delete q[k]; }, 'Order ' + k + ' (undo, board)').catch(failed);
+    });
+  }
+  function mark(codes, to, placed) {
     if (picked.length) $('clear').onclick();   // a move ends the selection at once (user, 2026-11-07)
     codes = codes.filter(function (c) { var it = byCode[c.toUpperCase()]; return it && ICONLIKE[it.kind] && it.status !== 'live' && it.status !== to && !(it.kind === 'set' && to === 'waiting'); });
     if (!codes.length) return;
-    var was = {}, now = {};
+    var was = {}, now = {}, order = (to === 'top' || to === 'kept') && !placed ? first(codes, to) : null;
     codes.forEach(function (c) { var it = byCode[c.toUpperCase()]; was[it.code] = it.status; now[it.code] = to; it.status = to; });
     var put = function (m) { Object.keys(m).forEach(function (c) { byCode[c.toUpperCase()].status = m[c]; }); refresh(); };
-    var back = function () { put(was); setStatus(was, 'Move ' + codes.join(', ') + ' back (board)').catch(function (e) { put(now); failed(e); }); };
+    var back = function () { if (order) unfirst(order); put(was); setStatus(was, 'Move ' + codes.join(', ') + ' back (board)').catch(function (e) { put(now); failed(e); }); };
     did('move ' + J(codes) + ' to ' + (ZONES[to] || to), back);
     refresh();
     setStatus(now, 'Move ' + codes.join(', ') + ' to ' + to + ' (board)').then(function () {
