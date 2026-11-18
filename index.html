@@ -412,6 +412,7 @@ section.ph .hole { height: 90px; border-radius: 10px; display: flex; align-items
           var e = new Error((j.message || 'error') + ' (' + r.status + ')'); e.readOnly = r.status === 403 || r.status === 404; throw e;
         });
         return r.json().then(function (j) {
+          if (j.commit) bump(message, [path], j.commit.committer.date);
           note(path, base); note(path, j.content.sha); wrote[path] = j.content.sha; mine[path] = text;
           var now = Date.now(); group.forEach(function (m) { m.sha = j.content.sha; m.done = now; m.ok(); });
         });
@@ -743,7 +744,7 @@ section.ph .hole { height: 90px; border-radius: 10px; display: flex; align-items
     return commitTry(paths, make).then(function (x) { writing--; return x; }, function (e) { writing--; throw e; });
   }
   function commitTry(paths, make, tries) {
-    var ref, out;
+    var ref, out, made;
     return api('/git/ref/heads/main').then(function (r) { ref = r.object.sha; return api('/git/commits/' + ref); }).then(function (c) {
       var base = c.tree.sha;
       return Promise.all(paths.map(function (f) { return rawAt(f, ref); })).then(function (t) {
@@ -753,10 +754,10 @@ section.ph .hole { height: 90px; border-radius: 10px; display: flex; align-items
         Object.keys(out.files).forEach(function (f) { tree.push({ path: f, mode: '100644', type: 'blob', content: out.files[f] }); });
         return api('/git/trees', { method: 'POST', body: JSON.stringify({ base_tree: base, tree: tree }) })
           .then(function (t) { return api('/git/commits', { method: 'POST', body: JSON.stringify({ message: out.message, tree: t.sha, parents: [ref] }) }); })
-          .then(function (c) { return api('/git/refs/heads/main', { method: 'PATCH', body: JSON.stringify({ sha: c.sha }) }); });
+          .then(function (c) { made = c; return api('/git/refs/heads/main', { method: 'PATCH', body: JSON.stringify({ sha: c.sha }) }); });
       });
     }).then(function () {
-      if (out && touch(touched(out.message, Object.keys(out.files).concat(Object.keys(out.links || {}))), new Date().toISOString().replace(/\.\d+Z$/, 'Z'))) { keep('board-dates', dates); setTimeout(side, 0); }   // the board's own work: its group to the top
+      if (out && made) bump(out.message, Object.keys(out.files).concat(Object.keys(out.links || {})), made.committer.date);   // the board's own work: its group to the top
       return out && out.result;
     }, function (e) {
       if ((e.status === 422 || e.status === 409) && (tries || 0) < 4) return commitTry(paths, make, (tries || 0) + 1);
@@ -880,7 +881,7 @@ section.ph .hole { height: 90px; border-radius: 10px; display: flex; align-items
   function stored(k, d) { try { return JSON.parse(localStorage.getItem(k)) || d; } catch (e) { return d; } }
   function keep(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} }
   var lastNav = [null, 0];
-  var folded = stored('board-folded', {}), sorts = stored('board-sort-2', { projects: 'modified', collections: 'mine' }), dates = stored('board-dates', {}), dating = false;
+  var folded = stored('board-folded', {}), sorts = stored('board-sort-2', { projects: 'modified', collections: stored('board-sort', {}).collections || 'mine' }), dates = stored('board-dates', {}), dating = false;
   function shownProjects() {
     var parts = { projects: [], collections: [] };
     data.projects.forEach(function (p) { if (!groupGone(p)) parts[coll(p) ? 'collections' : 'projects'].push(p); });
@@ -920,34 +921,39 @@ section.ph .hole { height: 90px; border-radius: 10px; display: flex; align-items
   // the groups a commit touches: files under projects/<id>/, codes in its message (NI-86, ni86), a message opening with
   // a group's title or folder and a colon
   function touched(message, files) {
-    var ids = {}, m = message || '', re = /\b([A-Za-z]{2})-?(\d+)\b/g, x, first = m.split(':')[0].trim().toLowerCase();
+    var ids = {}, m = message || '', re = /(^|[^#\w])([A-Za-z]{2,3})-?(\d+)\b/g, x, first = m.split(':')[0].trim().toLowerCase();
     (files || []).forEach(function (f) { var y = /^projects\/([^/]+)\//.exec(f.filename || f); if (y) ids[y[1]] = 1; });
     data.projects.forEach(function (p) {
       if (first === p.id || first === p.title.toLowerCase()) ids[p.id] = 1;
     });
-    while ((x = re.exec(m))) data.projects.forEach(function (p) { if (p.prefix && p.prefix.toUpperCase() === x[1].toUpperCase()) ids[p.id] = 1; });
+    while ((x = re.exec(m))) { var it = byCode[(x[2] + '-' + x[3]).toUpperCase()]; if (it) ids[it.project] = 1; }   // a code on the board, never a colour (#bb0000) or a word (CD4)
     return Object.keys(ids);
   }
   function touch(ids, when) {
     var moved = false;
-    ids.forEach(function (id) { var x = dates[id] = dates[id] || {}; if (when && (!x.m || x.m < when)) { x.m = when; moved = true; } });
+    if (when) ids.forEach(function (id) { var x = dates[id] = dates[id] || {}; if (!x.m || x.m < when) { x.m = when; moved = true; } });
     return moved;
+  }
+  function bump(message, files, when) {   // never lets a finished commit fail
+    try { if (touch(touched(message, files), when)) { keep('board-dates', dates); setTimeout(side, 0); } } catch (e) {}
   }
   function recentWork() {   // the last 100 commits' messages: the board's own moves name codes, not folders
     return fetch(API + repo + '/commits?per_page=100', { headers: jhead, cache: 'no-store' }).then(function (r) { return r.ok ? r.json() : []; })
-      .then(function (j) { j.forEach(function (c) { touch(touched(c.commit.message), c.commit.committer.date); }); }, function () {});
+      .then(function (j) { j.forEach(function (c) { touch(touched(c.commit.message), c.commit.committer.date); }); }).catch(function () {});
   }
   function sawCommit(sha) {   // a new commit seen by the poll: its groups to the top at once
     if (!/modified/.test(sorts.projects + ' ' + sorts.collections)) return;
     fetch(API + repo + '/commits/' + sha, { headers: jhead, cache: 'no-store' }).then(function (r) { return r.ok ? r.json() : null; }).then(function (c) {
-      if (c && touch(touched(c.commit.message, c.files), c.commit.committer.date)) { keep('board-dates', dates); side(); }
+      if (c) bump(c.commit.message, c.files, c.commit.committer.date);
     }).catch(function () {});
   }
   function getDates() {
     if (dating) return;
-    var now = Date.now(), want = data.projects.filter(function (p) { var x = dates[p.id]; return !x || !x.c || now - (x.at || 0) > 3600000; });
+    var by = function (p) { return sorts[coll(p) ? 'collections' : 'projects']; }, created = /created/.test(sorts.projects + ' ' + sorts.collections);
+    var now = Date.now(), want = data.projects.filter(function (p) {
+      var x = dates[p.id]; return /created|modified/.test(by(p)) && (!x || !x.at || (by(p) === 'created' && !x.c) || now - x.at > 3600000);
+    });
     dating = true;
-    if (!want.length) return recentWork().then(function () { dating = false; keep('board-dates', dates); side(); });
     var one = function (p) {
       var url = API + repo + '/commits?path=projects/' + encodeURIComponent(p.id) + '&per_page=1';
       var day = function (j) { return j && j[0] && j[0].commit ? j[0].commit.committer.date : ''; };
@@ -956,13 +962,13 @@ section.ph .hole { height: 90px; border-radius: 10px; display: flex; align-items
         var last = ((r.headers.get('Link') || '').match(/[?&]page=(\d+)>; rel="last"/) || [])[1];
         return r.json().then(function (j) {
           var m = day(j), old = dates[p.id] && dates[p.id].c;
-          if (old || !last) return { c: old || m, m: m };
+          if (old || !last || !created) return { c: old || (last ? '' : m), m: m };
           return fetch(url + '&page=' + last, { headers: jhead, cache: 'no-store' }).then(function (r2) { return r2.ok ? r2.json() : []; }).then(function (j2) { return { c: day(j2), m: m }; });   // none on a failure: asked again next time
         });
       }).then(function (x) { var o = dates[p.id] || {}; dates[p.id] = { c: x.c, m: o.m && o.m > x.m ? o.m : x.m, at: now }; }, function () {});
     };
     var queue = want.slice(), run = function () { var p = queue.shift(); return p ? one(p).then(run) : null; };
-    Promise.all([run(), run(), run(), run(), recentWork()]).then(function () { dating = false; keep('board-dates', dates); side(); });
+    Promise.all([run(), run(), run(), run(), recentWork()]).catch(function () {}).then(function () { dating = false; keep('board-dates', dates); side(); });
   }
   // a group renamed in the list (user, 2026-11-15: "double click on the list for the item would allow me to change the
   // name"): its title in board.json and index.json, one commit, marked named, so a session keeps it as the user set it
