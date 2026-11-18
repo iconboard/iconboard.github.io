@@ -382,6 +382,7 @@ section.ph .hole { height: 90px; border-radius: 10px; display: flex; align-items
   function limit() { return window.AbortSignal && AbortSignal.timeout ? AbortSignal.timeout(20000) : undefined; }
   function busy() { return writing || Object.keys(writes).some(function (k) { return writes[k].busy; }); }
   function writeJson(path, empty, change, message) {   // resolves once the change is on GitHub
+    changes++;
     var me = { change: change, message: message }; (pending[path] = pending[path] || []).push(me);
     var q = writes[path] = writes[path] || { waiting: [], busy: false };
     var p = new Promise(function (ok, no) { me.ok = ok; me.no = no; });
@@ -665,9 +666,10 @@ section.ph .hole { height: 90px; border-radius: 10px; display: flex; align-items
   // in Top or Keep; its PNG and ICO files are made only when it goes live on a site.
   function st(it) { return it.status; }
   // order: places.json keys and the lists they get, written in the same commit as the move (a second commit for the
-  // order at the same moment moved the branch on and the move was refused, so the board took it back: 2026-11-19)
+  // order at the same moment moved the branch on and the move was refused, so the board took it back: 2026-11-18)
   function setStatus(map, message, order) {    // map: code -> top, kept or waiting
-    return commitData(['board.json', 'index.json', 'places.json'], function (t) {
+    var withOrder = order && Object.keys(order).length;
+    return commitData(['board.json', 'index.json'].concat(withOrder ? ['places.json'] : []), function (t) {
       var board = JSON.parse(t[0]), index = JSON.parse(t[1]), by = {}, n0 = 0;
       index.items.forEach(function (x) { by[x.code] = x; });
       Object.keys(map).forEach(function (code) {
@@ -681,7 +683,7 @@ section.ph .hole { height: 90px; border-radius: 10px; display: flex; align-items
       });
       if (!n0) return null;
       var files = { 'board.json': JSON.stringify(board, null, 2) + '\n', 'index.json': JSON.stringify(index) };
-      if (order && Object.keys(order).length) {
+      if (withOrder) {
         var q = JSON.parse(t[2] || '{}');
         Object.keys(order).forEach(function (k) { var v = order[k](q[k]); if (v) q[k] = v; else delete q[k]; });
         files['places.json'] = JSON.stringify(q, null, 1) + '\n';
@@ -692,20 +694,22 @@ section.ph .hole { height: 90px; border-radius: 10px; display: flex; align-items
   // A move to Top or Keep puts the icons first there (user, 2026-11-18: "if it was chosen recent, probably this is what
   // I'm going to look at in the first place"): their codes at the start of places.json for that group, unless a drop
   // among the icons placed them (placed). The order goes into the move's own commit (setStatus).
-  function first(codes, to) {   // { was: the keys' earlier lists, to put back on undo; put: for setStatus }
+  function first(codes, to) {   // { was: the codes put first per key, to take out on undo; put: for setStatus }
     var keys = {}, was = {}, put = {};
     codes.forEach(function (c) { var it = byCode[c.toUpperCase()]; (keys[it.project + '/' + to] = keys[it.project + '/' + to] || []).push(it.code); });
     Object.keys(keys).forEach(function (k) {
       var mine = keys[k], front = function (l) { return mine.concat((l || []).filter(function (c) { return mine.indexOf(c) < 0; })); };
-      was[k] = places[k]; places[k] = front(places[k]); put[k] = front;
+      was[k] = mine; places[k] = front(places[k]); put[k] = front;
     });
     return { was: was, put: put };
   }
-  function unfirst(order) {   // the earlier lists back here; returns what setStatus writes for them
+  // undo, or a move that failed: only the moved codes leave the list, so order changes made since stay
+  function unfirst(order) {   // here at once; returns what setStatus writes for them
     var put = {};
     Object.keys(order.was).forEach(function (k) {
-      var w = order.was[k]; if (w) places[k] = w; else delete places[k];
-      put[k] = function () { return w; };
+      var mine = order.was[k], out = function (l) { var r = (l || []).filter(function (c) { return mine.indexOf(c) < 0; }); return r.length ? r : null; };
+      var v = out(places[k]); if (v) places[k] = v; else delete places[k];
+      put[k] = out;
     });
     return put;
   }
@@ -721,7 +725,10 @@ section.ph .hole { height: 90px; border-radius: 10px; display: flex; align-items
     refresh();
     setStatus(now, 'Move ' + codes.join(', ') + ' to ' + to + ' (board)', order && order.put).then(function () {
       toast('Moved to ' + (ZONES[to] || to) + ': ' + J(codes), 'Undo', function () { var i = undos.map(function (u) { return u[1]; }).indexOf(back); if (i >= 0) undos.splice(i, 1); back(); });
-    }, function (e) { if (order) unfirst(order); put(was); failed(e); });
+    }, function (e) {
+      var i = undos.map(function (u) { return u[1]; }).indexOf(back); if (i >= 0) undos.splice(i, 1);   // nothing to undo
+      if (order) unfirst(order); put(was); failed(e);
+    });
   }
   // Copy to another group (user, 2026-11-07: "dragging and dropping into a group on the left so it is copied there";
   // then "15s seems too long"): the page makes the copy itself, one commit through the Git Data API. A copy of a set
@@ -729,7 +736,7 @@ section.ph .hole { height: 90px; border-radius: 10px; display: flex; align-items
   // group's README and index.json change with it. The card shows its code at once, faded until the commit is in.
   // Numbers as the data repository's scripts give them: one past every number the group has had.
   function api(path, opt) {
-    return fetch(API + repo + path, Object.assign({ headers: jhead, cache: 'no-store' }, opt || {})).then(function (r) {
+    return fetch(API + repo + path, Object.assign({ headers: jhead, cache: 'no-store', signal: limit() }, opt || {})).then(function (r) {
       if (r.ok) return r.json();
       return r.json().catch(function () { return {}; }).then(function (j) {
         var e = new Error((j.message || 'error') + ' (' + r.status + ')'); e.status = r.status; e.readOnly = r.status === 403 || r.status === 404; throw e;
@@ -737,7 +744,7 @@ section.ph .hole { height: 90px; border-radius: 10px; display: flex; align-items
     });
   }
   function rawAt(path, ref) {
-    return fetch(API + repo + '/contents/' + path + '?ref=' + ref, { headers: head, cache: 'no-store' }).then(function (r) {
+    return fetch(API + repo + '/contents/' + path + '?ref=' + ref, { headers: head, cache: 'no-store', signal: limit() }).then(function (r) {
       if (r.status === 404) return null; if (!r.ok) throw new Error(path + ': ' + r.status); return r.text();
     });
   }
@@ -767,10 +774,17 @@ section.ph .hole { height: 90px; border-radius: 10px; display: flex; align-items
   }
   // one commit to the data repository: read the files at the head of main, make(texts) returns {message, files:
   // {path: text}, links: {path: sha}, result} or null; if someone else wrote in between, start again from the new head
-  var writing = 0;                      // commits of the page itself under way (the reload below waits for them)
+  var writing = 0, changes = 0;          // commits of the page itself under way (the reload below waits for them);
+                                        // changes counts every write the page starts, so a reload begun before one is dropped
+  // the page's commits go one after another, so its own quick moves never race each other for the branch (several at
+  // once made all but one retry, and after the last retry the board took a move back); retries are for commits made
+  // elsewhere
+  var commits = Promise.resolve();
   function commitData(paths, make) {
-    writing++;
-    return commitTry(paths, make).then(function (x) { writing--; return x; }, function (e) { writing--; throw e; });
+    writing++; changes++;
+    var run = commits.then(function () { return commitTry(paths, make); });
+    commits = run.catch(function () {});
+    return run.then(function (x) { writing--; return x; }, function (e) { writing--; throw e; });
   }
   function commitTry(paths, make, tries) {
     var ref, out, made;
@@ -861,11 +875,12 @@ section.ph .hole { height: 90px; border-radius: 10px; display: flex; align-items
   // screen until the next reload.
   var JSONS = [['trash.json', {}, function (v) { trash = v; }], ['order.json', [], function (v) { order = v; }], ['places.json', {}, function (v) { places = v; }],
                ['favourites.json', [], function (v) { favs = v; }], ['test.json', [], function (v) { tests = v; }], ['before-colours.json', {}, function (v) { keepSets = JSON.stringify(v); }]];
-  function load(ref) {   // ref: the commit the 15 s check saw, so every file is read as it is in that commit
-    var at = ref ? '?ref=' + ref : '';
+  function load(ref, guard) {   // ref: the commit the 15 s check saw, so every file is read as it is in that commit
+    var at = ref ? '?ref=' + ref : '', g = changes;   // guard: a reload, dropped if the page changed something meanwhile
     return Promise.all([fetch(API + repo + '/contents/index.json' + at, { headers: head, cache: 'no-store' }).then(function (r) {
       refused(r); if (!r.ok) throw new Error('index.json: ' + r.status); return r.json();
     })].concat(JSONS.map(function (f) { return readRaw(f[0], f[1], ref); }))).then(function (res) {
+      if (guard && (changes !== g || busy())) throw new Error('stale');   // older than a move the user just made
       JSONS.forEach(function (f, i) { f[2](overlay(f[0], res[i + 1].obj, res[i + 1].sha)); });
       data = res[0]; byCode = {}; sortProjects(); data.items.forEach(function (it) { byCode[it.code.toUpperCase()] = it; });
       picked = picked.filter(function (c) { return byCode[c.toUpperCase()]; });
@@ -873,8 +888,8 @@ section.ph .hole { height: 90px; border-radius: 10px; display: flex; align-items
     });
   }
   document.addEventListener('visibilitychange', function () {
-    if (document.visibilityState !== 'visible' || !data || dragCodes || Date.now() - loaded < 60000) return;
-    load().then(function () { refresh(); prefetch(); }).catch(function () {});
+    if (document.visibilityState !== 'visible' || !data || dragCodes || busy() || Date.now() - loaded < 60000) return;
+    load(null, true).then(function () { refresh(); prefetch(); }).catch(function () {});
   });
   // and while it stays open (user, 2026-11-10: "every time when I modify icons, the icon board should be informed"):
   // every 15 s the data repository's last commit is asked for (40 characters); when it changed (an icon applied to a
@@ -887,7 +902,10 @@ section.ph .hole { height: 90px; border-radius: 10px; display: flex; align-items
       .then(function (r) { return r.ok ? r.text() : null; }).then(function (sha) {
         sha = (sha || '').trim(); if (!sha || commitsSeen[sha]) return;   // a commit seen before is an older answer: no step back
         commitsSeen[sha] = 1; var was = lastCommit; lastCommit = sha;
-        if (was && !dragCodes && !busy()) return load(sha).then(function () { refresh(); prefetch(); sawCommit(sha); datesIfWanted(); });
+        var again = function () { delete commitsSeen[sha]; lastCommit = was; };   // asked again at the next check
+        if (!was) return;
+        if (dragCodes || busy()) return again();
+        return load(sha, true).then(function () { refresh(); prefetch(); sawCommit(sha); datesIfWanted(); }, again);
       }).catch(function () {});
   }, 15000);
   load().then(function () {
