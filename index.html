@@ -664,8 +664,10 @@ section.ph .hole { height: 90px; border-radius: 10px; display: flex; align-items
   // project "top" (sets and proposals) and "kept" (proposals only: a set is kept unless top). A proposal stays one SVG
   // in Top or Keep; its PNG and ICO files are made only when it goes live on a site.
   function st(it) { return it.status; }
-  function setStatus(map, message) {    // map: code -> top, kept or waiting
-    return commitData(['board.json', 'index.json'], function (t) {
+  // order: places.json keys and the lists they get, written in the same commit as the move (a second commit for the
+  // order at the same moment moved the branch on and the move was refused, so the board took it back: 2026-11-19)
+  function setStatus(map, message, order) {    // map: code -> top, kept or waiting
+    return commitData(['board.json', 'index.json', 'places.json'], function (t) {
       var board = JSON.parse(t[0]), index = JSON.parse(t[1]), by = {}, n0 = 0;
       index.items.forEach(function (x) { by[x.code] = x; });
       Object.keys(map).forEach(function (code) {
@@ -678,27 +680,34 @@ section.ph .hole { height: 90px; border-radius: 10px; display: flex; align-items
         it.status = to; n0++;
       });
       if (!n0) return null;
-      return { message: message, files: { 'board.json': JSON.stringify(board, null, 2) + '\n', 'index.json': JSON.stringify(index) } };
+      var files = { 'board.json': JSON.stringify(board, null, 2) + '\n', 'index.json': JSON.stringify(index) };
+      if (order && Object.keys(order).length) {
+        var q = JSON.parse(t[2] || '{}');
+        Object.keys(order).forEach(function (k) { var v = order[k](q[k]); if (v) q[k] = v; else delete q[k]; });
+        files['places.json'] = JSON.stringify(q, null, 1) + '\n';
+      }
+      return { message: message, files: files };
     });
   }
   // A move to Top or Keep puts the icons first there (user, 2026-11-18: "if it was chosen recent, probably this is what
   // I'm going to look at in the first place"): their codes at the start of places.json for that group, unless a drop
-  // among the icons placed them (placed).
-  function first(codes, to) {   // gives the keys' earlier lists, to put back on undo
-    var keys = {}, was = {};
+  // among the icons placed them (placed). The order goes into the move's own commit (setStatus).
+  function first(codes, to) {   // { was: the keys' earlier lists, to put back on undo; put: for setStatus }
+    var keys = {}, was = {}, put = {};
     codes.forEach(function (c) { var it = byCode[c.toUpperCase()]; (keys[it.project + '/' + to] = keys[it.project + '/' + to] || []).push(it.code); });
     Object.keys(keys).forEach(function (k) {
-      var mine = keys[k]; was[k] = places[k];
-      places[k] = mine.concat((places[k] || []).filter(function (c) { return mine.indexOf(c) < 0; }));
-      writeJson('places.json', {}, function (q) { q[k] = mine.concat((q[k] || []).filter(function (c) { return mine.indexOf(c) < 0; })); }, 'Order ' + k + ': ' + mine.join(', ') + ' first (board)').catch(failed);
+      var mine = keys[k], front = function (l) { return mine.concat((l || []).filter(function (c) { return mine.indexOf(c) < 0; })); };
+      was[k] = places[k]; places[k] = front(places[k]); put[k] = front;
     });
-    return was;
+    return { was: was, put: put };
   }
-  function unfirst(was) {
-    Object.keys(was).forEach(function (k) {
-      if (was[k]) places[k] = was[k]; else delete places[k];
-      writeJson('places.json', {}, function (q) { if (was[k]) q[k] = was[k]; else delete q[k]; }, 'Order ' + k + ' (undo, board)').catch(failed);
+  function unfirst(order) {   // the earlier lists back here; returns what setStatus writes for them
+    var put = {};
+    Object.keys(order.was).forEach(function (k) {
+      var w = order.was[k]; if (w) places[k] = w; else delete places[k];
+      put[k] = function () { return w; };
     });
+    return put;
   }
   function mark(codes, to, placed) {
     if (picked.length) $('clear').onclick();   // a move ends the selection at once (user, 2026-11-07)
@@ -707,12 +716,12 @@ section.ph .hole { height: 90px; border-radius: 10px; display: flex; align-items
     var was = {}, now = {}, order = (to === 'top' || to === 'kept') && !placed ? first(codes, to) : null;
     codes.forEach(function (c) { var it = byCode[c.toUpperCase()]; was[it.code] = it.status; now[it.code] = to; it.status = to; });
     var put = function (m) { Object.keys(m).forEach(function (c) { byCode[c.toUpperCase()].status = m[c]; }); refresh(); };
-    var back = function () { if (order) unfirst(order); put(was); setStatus(was, 'Move ' + codes.join(', ') + ' back (board)').catch(function (e) { put(now); failed(e); }); };
+    var back = function () { var o = order ? unfirst(order) : null; put(was); setStatus(was, 'Move ' + codes.join(', ') + ' back (board)', o).catch(function (e) { put(now); failed(e); }); };
     did('move ' + J(codes) + ' to ' + (ZONES[to] || to), back);
     refresh();
-    setStatus(now, 'Move ' + codes.join(', ') + ' to ' + to + ' (board)').then(function () {
+    setStatus(now, 'Move ' + codes.join(', ') + ' to ' + to + ' (board)', order && order.put).then(function () {
       toast('Moved to ' + (ZONES[to] || to) + ': ' + J(codes), 'Undo', function () { var i = undos.map(function (u) { return u[1]; }).indexOf(back); if (i >= 0) undos.splice(i, 1); back(); });
-    }, function (e) { put(was); failed(e); });
+    }, function (e) { if (order) unfirst(order); put(was); failed(e); });
   }
   // Copy to another group (user, 2026-11-07: "dragging and dropping into a group on the left so it is copied there";
   // then "15s seems too long"): the page makes the copy itself, one commit through the Git Data API. A copy of a set
@@ -780,7 +789,8 @@ section.ph .hole { height: 90px; border-radius: 10px; display: flex; align-items
       if (out && made) bump(out.message, Object.keys(out.files).concat(Object.keys(out.links || {})), made.committer.date);   // the board's own work: its group to the top
       return out && out.result;
     }, function (e) {
-      if ((e.status === 422 || e.status === 409) && (tries || 0) < 4) return commitTry(paths, make, (tries || 0) + 1);
+      if ((e.status === 422 || e.status === 409) && (tries || 0) < 8)   // another commit came first: build on it
+        return new Promise(function (ok) { setTimeout(ok, 200 * ((tries || 0) + 1)); }).then(function () { return commitTry(paths, make, (tries || 0) + 1); });
       throw e;
     });
   }
@@ -872,12 +882,12 @@ section.ph .hole { height: 90px; border-radius: 10px; display: flex; align-items
   // writes, which show their result already.
   var lastCommit = null, commitsSeen = {};
   setInterval(function () {
-    if (document.visibilityState !== 'visible' || !data || dragCodes || writing || renaming) return;
+    if (document.visibilityState !== 'visible' || !data || dragCodes || busy() || renaming) return;
     fetch(API + repo + '/commits/main', { headers: { Authorization: 'Bearer ' + token, Accept: 'application/vnd.github.sha' }, cache: 'no-store' })
       .then(function (r) { return r.ok ? r.text() : null; }).then(function (sha) {
         sha = (sha || '').trim(); if (!sha || commitsSeen[sha]) return;   // a commit seen before is an older answer: no step back
         commitsSeen[sha] = 1; var was = lastCommit; lastCommit = sha;
-        if (was && !dragCodes && !writing) return load(sha).then(function () { refresh(); prefetch(); sawCommit(sha); datesIfWanted(); });
+        if (was && !dragCodes && !busy()) return load(sha).then(function () { refresh(); prefetch(); sawCommit(sha); datesIfWanted(); });
       }).catch(function () {});
   }, 15000);
   load().then(function () {
